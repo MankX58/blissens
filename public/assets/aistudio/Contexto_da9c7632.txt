@@ -1,0 +1,57 @@
+Qué pide el reto
+El cliente: Blissens Odontología (Eme y Eme Group, Medellín). Hacen implantes, rehabilitación oral y odontología general, y atienden pacientes locales, pacientes del exterior y deportistas de alto nivel.
+En pocas palabras: pasar de una gestión manual y reactiva (Excel y WhatsApp, paciente por paciente) a un sistema comercial proactivo que recupere a los pacientes inactivos, priorice a los de alto valor y llene los huecos de la agenda.
+El problema
+●       Pacientes que abandonan el tratamiento. Empiezan un plan (rehabilitación, ortodoncia, implantes), dejan de ir y nadie los vuelve a llamar.
+●       Huecos en la agenda. Las cancelaciones y las inasistencias dejan espacios vacíos: la clínica pierde plata y los especialistas se quedan sin trabajo.
+●       Todo es manual. Revisan la agenda en Excel y escriben por WhatsApp paciente por paciente, sin alertas ni prioridades.
+●       No hay segmentación ni mercadeo. Tratan a todos los pacientes igual. No hay alertas ni campañas para los segmentos de alto valor (internacionales y deportistas) ni según el tratamiento pendiente.
+Lo que quieren
+Un prototipo que lea la agenda y haga tres cosas:
+●       Identificar a los pacientes por recuperar.
+●       Generar alertas.
+●       Apoyar el mercadeo automatizado para llenar los espacios libres.
+La empresa y su contexto
+¿Qué organización es y a qué sector pertenece?
+Blissens es una clínica dental del sector salud ubicada en Medellín, fundada por los especialistas en rehabilitación oral Sara López y Juan Manuel Olarte. Pertenece a Eme y Eme Group S.A.S., una sociedad registrada en Medellín cuya actividad principal es la práctica odontológica.
+La clínica combina tecnología digital con un cuidado estético personalizado para mejorar tanto la salud dental como la autoestima del paciente. Ofrece desde cirugía oral hasta transformaciones completas de sonrisa, con planificación digital para que los tratamientos sean eficientes y la recuperación rápida. A los pacientes internacionales les ofrece asesoría virtual y coordina su viaje, alojamiento y transporte. En resumen, busca darles una experiencia cálida y cercana tanto a los pacientes locales como a los turistas médicos.
+¿Qué ocurre hoy y cómo se gestiona?
+La agenda de la clínica tiene una ocupación variable y no hay un sistema que permita controlar el proceso de cada paciente. Por eso muchos pacientes interrumpen su tratamiento y no se les vuelve a contactar. Además, los datos de los pacientes no se aprovechan para hacer mercadeo.
+Hoy la agenda se revisa en Excel y el seguimiento se hace por WhatsApp, paciente por paciente. Tampoco hay un control especial para los pacientes internacionales ni para los deportistas de alto nivel, que la clínica considera de alto valor.
+¿Por qué necesita resolverse y a quién afecta?
+Porque hoy quedan espacios vacíos en la agenda, se pierden ingresos y los especialistas trabajan por debajo de su capacidad. La meta es tener una agenda predecible y rentable, recuperar a esos pacientes y atraer nuevos.
+Los principales afectados son:
+●       El equipo administrativo y los auxiliares.
+●       Los especialistas: rehabilitadores, cirujanos, periodoncistas y ortodoncistas.
+●       Los pacientes que pierden la continuidad de su tratamiento.
+¿Dónde ocurre y con qué frecuencia?
+Dónde: en las áreas comercial y asistencial de la clínica, en tres momentos: el agendamiento inicial, el seguimiento después de la consulta y la recuperación de los pacientes que interrumpen su tratamiento. El cuello de botella está en la revisión manual de la agenda en Excel y en el contacto uno a uno por WhatsApp.
+Con qué frecuencia: todos los días. Los momentos más críticos son las confirmaciones del día, las inasistencias y las cancelaciones de último minuto, que dejan sillas vacías y se traducen en pérdida económica.
+
+El problema que vamos a abordar
+¿Cuál es el reto y quién vive el problema?
+El reto es mejorar el agendamiento, el seguimiento y la gestión de cancelaciones para recuperar pacientes y reducir las pérdidas económicas. Para eso queremos crear un prototipo que, a partir de la agenda, detecte a los pacientes que se pierden (los que cancelan, no asisten o dejan el tratamiento a medias), genere alertas para recontactarlos y ayude a llenar los huecos de la agenda con mercadeo automatizado.
+El problema lo viven:
+●       La auxiliar administrativa: hace el seguimiento a mano por WhatsApp, sin alertas y dependiendo de su memoria. Carga con procesos poco eficientes y con la presión de las pérdidas.
+●       Los especialistas: con una agenda llena de huecos tienen menos trabajo, menos ingresos y menos productividad.
+●       Los pacientes: reciben un seguimiento pobre, se desconectan del servicio y abandonan el tratamiento sin que nadie los vuelva a buscar.
+●       La clínica: pierde ingresos y no tiene datos para tomar decisiones.
+¿Qué sabemos con evidencia y qué suponemos?
+Lo que sabemos con evidencia:
+●       La clínica gestiona a sus pacientes solo con herramientas manuales y desconectadas (Excel y WhatsApp), lo que deja vacíos en el seguimiento de los tratamientos.
+●       El software odontológico envía un recordatorio automático entre 48 y 24 horas antes de la cita, y la auxiliar confirma a mano un día antes. Si el paciente no responde, se asume que va a ir.
+●       Cuando un paciente cancela o falta, se intenta reprogramar una o dos veces. No hay un protocolo de seguimiento ni se registra el motivo de la cancelación.
+●       Los pacientes que dejan de ir se detectan a mano al cierre de mes. Por ejemplo, los abonos de planes bajaron de 26 en junio a 10 en agosto.
+Lo que suponemos:
+●       Hace falta una herramienta que ayude a aprovechar mejor el tiempo de los especialistas.
+●       Es necesario clasificar a los pacientes según su situación y su valor para la clínica.
+●       Las campañas automatizadas y personalizadas pueden hacer que la atención sea más cercana y eficiente.
+¿Qué preguntas siguen sin resolver?
+Sabemos que el problema principal es la ocupación variable de la agenda, las inasistencias y la falta de seguimiento a los pacientes que interrumpen su tratamiento. Aun así, quedan varias preguntas abiertas:
+1. ¿Por qué los pacientes faltan o abandonan el tratamiento? Las fuentes dicen que muchos dejan de ir, pero no explican los motivos: costos, falta de recordatorios, tiempo de viaje, miedo o problemas de agenda.
+2. ¿Cuál es el impacto exacto en cifras? Se habla de pérdida de ingresos y baja productividad, pero no hay datos del porcentaje de citas canceladas, las horas vacías por semana o las pérdidas económicas.
+3. ¿Con qué criterios se prioriza y se recupera a un paciente? Se quiere identificar a los pacientes por recuperar y enfocar el mercadeo en los segmentos de alto valor, pero no están definidas las reglas: cuántos días de inactividad convierten a alguien en paciente por recuperar o qué tratamientos se priorizan.
+4. ¿Qué canal y qué frecuencia de contacto prefieren los pacientes? El seguimiento hoy es por WhatsApp, pero no sabemos cada cuánto escribir sin ser invasivos ni qué tasa de respuesta esperar frente a otros canales.
+5. ¿Se puede conectar el prototipo con el software de la clínica? La clínica usa un software odontológico que registra las citas y envía recordatorios, pero no sabemos si permite exportar los datos o integrarse con otra herramienta.
+¿Qué resultado necesita el usuario?
+El equipo administrativo y comercial de Blissens necesita un prototipo que, a partir de la agenda en Excel, identifique automáticamente a los pacientes por recuperar, genere alertas de seguimiento a tiempo y apoye el contacto personalizado por WhatsApp. Así podrá ocupar los espacios libres, evitar que los tratamientos se interrumpan y lograr que la ocupación y los ingresos de la clínica sean más predecibles y rentables.

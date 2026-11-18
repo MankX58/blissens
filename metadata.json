@@ -1,0 +1,6 @@
+{
+  "name": "Blissens",
+  "description": "Clinical workspace for aesthetic and general dentistry featuring patient follow-up triage, interactive FDI odontogram, chair scheduling, and patient consultation summaries.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
