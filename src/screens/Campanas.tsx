@@ -61,7 +61,7 @@ export function Campanas({
   const [verLista, setVerLista] = useState(false);
 
   const posibles = (filtro: (p: Paciente) => boolean) =>
-    pacientes.filter((p) => p.estado !== 'recuperado' && p.estado !== 'descartado' && p.telefono && filtro(p));
+    pacientes.filter((p) => (p.estado === 'pendiente' || p.estado === 'agotado') && p.telefono && filtro(p));
   const lista = useMemo(() => posibles(aud.filtro), [pacientes, aud]);
   const elegidos = lista.filter((p) => !quitados.has(p.id));
 

@@ -5,19 +5,23 @@ import {
   CASO_TXT,
   RESULTADO_TXT,
   altoValor,
+  diasDeRetraso,
   diasEntre,
   fechaCorta,
   fechaQueToca,
   ordenarDelDia,
   pasoActual,
   pesosCorto,
+  riesgoAlto,
   semaforo,
   tocaHoy,
   type Semaforo,
 } from '../lib/reglas';
-import { Cifra, Etiqueta, EtiquetaSegmento, Iniciales, Punto, RolChip, SEMAFORO_TXT, Vacio, btnBorde, btnNegro } from '../components/ui';
+import { Cifra, Etiqueta, Iniciales, Insignias, Meta, Punto, QueEsFallo, RolChip, SEMAFORO_TXT, Vacio, btnBorde, btnNegro } from '../components/ui';
 
-type Filtro = 'todos' | Semaforo | 'alto';
+type Filtro = 'todos' | Semaforo | 'alto' | 'riesgo' | 'Nuevo' | 'Antiguo' | 'sincel';
+type Orden = 'prioridad' | 'valor' | 'fallos' | 'antiguedad';
+const POR_PAGINA = 25;
 
 export function Hoy({
   pacientes,
@@ -33,43 +37,61 @@ export function Hoy({
   onAbrir: (id: string) => void;
 }) {
   const [filtro, setFiltro] = useState<Filtro>('todos');
+  const [orden, setOrden] = useState<Orden>('prioridad');
   const [buscar, setBuscar] = useState('');
+  const [mostrar, setMostrar] = useState(POR_PAGINA);
 
   const delDia = useMemo(() => ordenarDelDia(pacientes.filter((p) => tocaHoy(p, hoy)), hoy), [pacientes, hoy]);
   const hechosHoy = pacientes.filter((p) => p.contactos.some((c) => c.fecha === hoy));
   const proximos = pacientes
     .filter((p) => p.estado === 'pendiente' && !tocaHoy(p, hoy))
-    .sort((a, b) => (fechaQueToca(a)! < fechaQueToca(b)! ? -1 : 1))
+    .sort((a, b) => (fechaQueToca(a, hoy)! < fechaQueToca(b, hoy)! ? -1 : 1))
     .slice(0, 6);
+  const activos = pacientes.filter((p) => p.estado === 'activo').length;
 
   const cuenta = { rojo: 0, amarillo: 0, verde: 0 };
   delDia.forEach((p) => cuenta[semaforo(p, hoy)!]++);
   const enJuego = delDia.reduce((s, p) => s + p.valor, 0);
   const total = delDia.length + hechosHoy.length;
   const avance = total ? hechosHoy.length / total : 0;
+  const n = (f: (p: Paciente) => boolean) => delDia.filter(f).length;
 
   const q = buscar.trim().toLowerCase();
-  const visibles = delDia.filter(
-    (p) =>
-      (filtro === 'todos' || (filtro === 'alto' ? altoValor(p) : semaforo(p, hoy) === filtro)) &&
-      (!q || p.nombre.toLowerCase().includes(q) || p.tratamiento.toLowerCase().includes(q))
-  );
+  const visibles = delDia
+    .filter((p) => {
+      const ok =
+        filtro === 'todos' ||
+        (filtro === 'alto'
+          ? altoValor(p)
+          : filtro === 'riesgo'
+            ? riesgoAlto(p)
+            : filtro === 'Nuevo' || filtro === 'Antiguo'
+              ? p.antiguedad === filtro
+              : filtro === 'sincel'
+                ? !p.telefono
+                : semaforo(p, hoy) === filtro);
+      return ok && (!q || p.nombre.toLowerCase().includes(q) || p.idPaciente.includes(q) || p.tratamiento.toLowerCase().includes(q));
+    })
+    .sort((a, b) =>
+      orden === 'valor'
+        ? b.valor - a.valor
+        : orden === 'fallos'
+          ? b.fallosSeguidos - a.fallosSeguidos || b.fallosHistoricos - a.fallosHistoricos
+          : orden === 'antiguedad'
+            ? diasEntre(b.fechaEvento, hoy) - diasEntre(a.fechaEvento, hoy)
+            : 0
+    );
 
-  const f = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
-  const fechaLarga = f[0].toUpperCase() + f.slice(1);
-  const h = new Date().getHours();
-  const saludo = h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches';
+  const fecha = new Date(`${hoy}T12:00:00`).toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const fechaLarga = fecha[0].toUpperCase() + fecha.slice(1);
 
   return (
     <>
-      {/* encabezado del día */}
       <section className="entrar relative overflow-hidden rounded-[32px] bg-ink px-6 py-8 text-white sm:px-10 sm:py-11">
         <div className="aura iris pointer-events-none absolute -right-24 -top-32 size-[420px] rounded-full opacity-35 blur-3xl" />
         <div className="relative">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-white/55">
-              {saludo} · {fechaLarga}
-            </p>
+            <p className="text-sm text-white/55">Fecha de trabajo · {fechaLarga}</p>
             <RolChip rol="auxiliar" oscuro />
           </div>
           <h1 className="mt-4 text-4xl font-bold leading-[1.02] tracking-tight sm:text-[64px]">
@@ -87,14 +109,14 @@ export function Hoy({
             <div>
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/60">
                 <span>
-                  <b className="text-white">{hechosHoy.length}</b> de {total} contactados
+                  <b className="text-white">{hechosHoy.length}</b> de {total} contactados · {activos} activos con cita fuera de la bandeja
                 </span>
                 {enJuego > 0 && (
                   <span>
                     <b className="text-white">
                       <Cifra valor={enJuego} formato={pesosCorto} />
                     </b>{' '}
-                    en tratamientos por recuperar
+                    en pausa según el arancel
                   </span>
                 )}
               </div>
@@ -115,60 +137,76 @@ export function Hoy({
         </div>
       </section>
 
-      {/* cómo funciona */}
+      {/* RN-05 */}
       <div className="escalonado mt-5 grid gap-3 sm:grid-cols-3">
         {[
-          ['verde', 'Día 3', 'Primer mensaje después de que cancela, falta o recibe su diagnóstico.'],
-          ['amarillo', 'Día 7', 'Si no respondió, segundo mensaje con otra propuesta.'],
-          ['rojo', 'Día 15', 'Último intento. Si no responde, pasa a campañas.'],
+          ['rojo', 'Urgente · 0 a 3 días', 'Recién canceló o faltó. También VIP y riesgo alto (3+ citas seguidas sin asistir).'],
+          ['amarillo', 'Seguimiento · día 7', 'Entre 4 y 14 días sin reagendar: segundo mensaje con otra propuesta.'],
+          ['verde', 'Rescate · día 15', 'Más de 15 días o control de limpieza preventivo. Si no responde, pasa a campañas.'],
         ].map(([c, t, d]) => (
           <div key={t} className="card flex gap-3 rounded-[20px] p-4">
             <Punto color={c as Semaforo} className="mt-1.5" />
             <div>
               <p className="text-sm font-semibold">{t}</p>
               <p className="text-xs leading-relaxed text-muted">{d}</p>
+              {c === 'rojo' && <QueEsFallo className="mt-2" />}
             </div>
           </div>
         ))}
       </div>
 
       {delDia.length > 0 && (
-        <div className="mb-4 mt-10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-1.5">
-            {(
-              [
-                ['todos', `Todos · ${delDia.length}`],
-                ['rojo', `Urgentes · ${cuenta.rojo}`],
-                ['amarillo', `Seguimiento · ${cuenta.amarillo}`],
-                ['verde', `Primer contacto · ${cuenta.verde}`],
-                ['alto', 'Alto valor'],
-              ] as [Filtro, string][]
-            ).map(([id, t]) => (
-              <button
-                key={id}
-                onClick={() => setFiltro(id)}
-                className={`rounded-full px-3.5 py-1.5 text-xs font-semibold ${
-                  filtro === id ? 'bg-ink text-white' : 'bg-card text-ink/70 ring-1 ring-line hover:text-ink'
-                }`}
-              >
-                {t}
-              </button>
-            ))}
+        <div className="mb-4 mt-10 space-y-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap gap-1.5">
+              {(
+                [
+                  ['todos', `Todos · ${delDia.length}`],
+                  ['rojo', `Urgentes · ${cuenta.rojo}`],
+                  ['amarillo', `Seguimiento · ${cuenta.amarillo}`],
+                  ['verde', `Rescate · ${cuenta.verde}`],
+                  ['riesgo', `Riesgo alto · ${n(riesgoAlto)}`],
+                  ['alto', `VIP / alto valor · ${n(altoValor)}`],
+                  ['Nuevo', `Nuevos · ${n((p) => p.antiguedad === 'Nuevo')}`],
+                  ['Antiguo', `Antiguos · ${n((p) => p.antiguedad === 'Antiguo')}`],
+                  ['sincel', `Sin celular · ${n((p) => !p.telefono)}`],
+                ] as [Filtro, string][]
+              ).map(([id, t]) => (
+                <button
+                  key={id}
+                  onClick={() => {
+                    setFiltro(id);
+                    setMostrar(POR_PAGINA);
+                  }}
+                  className={`rounded-full px-3.5 py-1.5 text-xs font-semibold ${filtro === id ? 'bg-ink text-white' : 'bg-card text-ink/70 ring-1 ring-line hover:text-ink'}`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
           </div>
-          <label className="relative sm:w-64">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
-            <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar paciente" className="field rounded-full pl-10" />
-          </label>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <label className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
+              <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar por nombre, # paciente o comentario" className="field rounded-full pl-10" />
+            </label>
+            <select value={orden} onChange={(e) => setOrden(e.target.value as Orden)} className="field rounded-full sm:w-60" aria-label="Ordenar bandeja">
+              <option value="prioridad">Orden: prioridad del semáforo</option>
+              <option value="valor">Orden: mayor dinero en pausa</option>
+              <option value="fallos">Orden: más fallos históricos</option>
+              <option value="antiguedad">Orden: más días sin reagendar</option>
+            </select>
+          </div>
         </div>
       )}
 
       {delDia.length === 0 ? (
         <div className="mt-10">
           <Vacio
-            titulo={hechosHoy.length ? 'Terminaste la lista de hoy' : 'No hay contactos pendientes para hoy'}
+            titulo={hechosHoy.length ? 'Terminaste la lista de hoy' : 'No hay contactos pendientes para esta fecha'}
             texto={
               hechosHoy.length
-                ? `Contactaste a ${hechosHoy.length} ${hechosHoy.length === 1 ? 'paciente' : 'pacientes'}. Mañana la lista se arma sola con la regla 3-7-15.`
+                ? `Contactaste a ${hechosHoy.length} ${hechosHoy.length === 1 ? 'paciente' : 'pacientes'}. La próxima lista se arma sola con la regla 3-7-15.`
                 : 'Carga la agenda exportada del software para detectar cancelaciones, inasistencias y tratamientos sin iniciar.'
             }
           >
@@ -178,16 +216,25 @@ export function Hoy({
           </Vacio>
         </div>
       ) : (
-        <ul key={filtro + q} className="escalonado space-y-2.5">
-          {visibles.map((p) => (
-            <Fila key={p.id} p={p} hoy={hoy} onContactar={() => onContactar(p)} onAbrir={() => onAbrir(p.id)} />
-          ))}
-          {visibles.length === 0 && <p className="py-10 text-center text-sm text-muted">Nadie coincide con ese filtro.</p>}
-        </ul>
+        <>
+          <ul key={filtro + q + orden} className="escalonado space-y-2.5">
+            {visibles.slice(0, mostrar).map((p) => (
+              <Fila key={p.id} p={p} hoy={hoy} onContactar={() => onContactar(p)} onAbrir={() => onAbrir(p.id)} />
+            ))}
+            {visibles.length === 0 && <p className="py-10 text-center text-sm text-muted">Nadie coincide con ese filtro.</p>}
+          </ul>
+          {visibles.length > mostrar && (
+            <div className="mt-4 text-center">
+              <button onClick={() => setMostrar((m) => m + POR_PAGINA)} className={btnBorde}>
+                Ver {Math.min(POR_PAGINA, visibles.length - mostrar)} más · quedan {visibles.length - mostrar}
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       <div className="mt-12 grid gap-5 lg:grid-cols-2">
-        <Bloque titulo="Ya contactados hoy" vacio="Aún no registras contactos hoy.">
+        <Bloque titulo="Ya contactados hoy" vacio="Aún no registras contactos en esta fecha.">
           {hechosHoy.map((p) => {
             const c = p.contactos.filter((x) => x.fecha === hoy).at(-1)!;
             return (
@@ -208,10 +255,10 @@ export function Hoy({
               <button onClick={() => onAbrir(p.id)} className="min-w-0 text-left">
                 <span className="block truncate text-sm font-medium hover:underline">{p.nombre}</span>
                 <span className="text-xs text-muted">
-                  {CASO_TXT[p.caso]} · día {pasoActual(p)}
+                  {CASO_TXT[p.caso]} · día {pasoActual(p, hoy)}
                 </span>
               </button>
-              <span className="num shrink-0 rounded-full bg-soft px-2.5 py-1 text-xs font-semibold text-ink/70">{fechaCorta(fechaQueToca(p)!)}</span>
+              <span className="num shrink-0 rounded-full bg-soft px-2.5 py-1 text-xs font-semibold text-ink/70">{fechaCorta(fechaQueToca(p, hoy)!)}</span>
             </li>
           ))}
         </Bloque>
@@ -222,8 +269,8 @@ export function Hoy({
 
 function Fila({ p, hoy, onContactar, onAbrir }: { p: Paciente; hoy: string; onContactar: () => void; onAbrir: () => void }) {
   const color = semaforo(p, hoy)!;
-  const atraso = diasEntre(fechaQueToca(p)!, hoy);
-  const paso = pasoActual(p)!;
+  const atraso = diasDeRetraso(p, hoy);
+  const paso = pasoActual(p, hoy)!;
   return (
     <li className="card lift grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-3 rounded-[22px] p-4 sm:grid-cols-[auto_1fr_auto_auto] sm:p-5">
       <button onClick={onAbrir} className="relative" aria-label={`Ver expediente de ${p.nombre}`}>
@@ -231,25 +278,26 @@ function Fila({ p, hoy, onContactar, onAbrir }: { p: Paciente; hoy: string; onCo
         <Punto color={color} className="absolute -right-0.5 -top-0.5 ring-2 ring-white" />
       </button>
       <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <button onClick={onAbrir} className="truncate text-left font-semibold hover:underline">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button onClick={onAbrir} className="mr-1 truncate text-left font-semibold hover:underline">
             {p.nombre}
           </button>
-          <EtiquetaSegmento p={p} />
+          <Insignias p={p} />
         </div>
-        <p className="mt-0.5 truncate text-sm text-muted">
+        <p className="mt-0.5 truncate text-sm text-ink/70">
           {CASO_TXT[p.caso]} · {p.tratamiento}
         </p>
+        <Meta p={p} className="mt-0.5 block truncate" />
       </div>
       <div className="col-span-2 flex items-center gap-4 text-sm sm:col-span-1 sm:block sm:text-right">
-        <div className="flex items-center gap-1 sm:justify-end" aria-label={`Intento del día ${paso}`}>
+        <div className="flex items-center gap-1 sm:justify-end" aria-label={`Etapa del día ${paso}`}>
           {[3, 7, 15].map((d) => (
             <span key={d} className={`h-1.5 rounded-full ${d === paso ? 'iris w-6' : d < paso ? 'w-3 bg-ink' : 'w-3 bg-line'}`} />
           ))}
-          <span className="ml-1.5 font-medium">Día {paso}</span>
+          <span className="ml-1.5 font-medium">{diasEntre(p.fechaEvento, hoy)} días</span>
           {atraso > 0 && <span className="text-rojo"> · {atraso}d tarde</span>}
         </div>
-        <p className="num mt-0.5 text-muted">{p.valor > 0 ? pesosCorto(p.valor) : p.especialista.split(' · ')[0]}</p>
+        <p className="num mt-0.5 text-muted">{pesosCorto(p.valor)}</p>
       </div>
       <button onClick={onContactar} className={`${btnNegro} group col-span-2 sm:col-span-1`}>
         Contactar <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />

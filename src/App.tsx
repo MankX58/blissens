@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { BarChart3, CalendarClock, FileSpreadsheet, Megaphone, Menu, Sparkles, Users } from 'lucide-react';
 import type { Campana, ConfigWA, Datos, Hueco, Motivo, Paciente, Pantalla, Resultado } from './types';
-import { datosDemo } from './data/demo';
-import { hoyISO, nuevoCiclo, pasoActual, registrarContacto, soloDigitos, tocaHoy } from './lib/reglas';
+import { cargarDatosIniciales, datosDesdeCarga, datosVacios } from './data/inicial';
+import { hoyISO, nuevoCiclo, pasoActual, registrarContacto, tocaHoy } from './lib/reglas';
 import { apiConectada, enviarPorAPI, siguientePaso } from './lib/campanas';
 import { ROLES, type Rol } from './lib/roles';
-import type { ResultadoLectura } from './lib/excel';
+import type { Carga } from './lib/excel';
 import { Contactar } from './components/Contactar';
 import { Sonrisa } from './components/ui';
 import { Hoy } from './screens/Hoy';
@@ -15,20 +15,56 @@ import { Campanas } from './screens/Campanas';
 import { Pacientes } from './screens/Pacientes';
 import { Indicadores } from './screens/Indicadores';
 
-const CLAVE = 'blissens-panel-v4';
+const CLAVE = 'blissens-panel-v6';
 
-function cargarGuardado(): Datos {
+function cargarGuardado(): Datos | null {
   try {
     const g = JSON.parse(localStorage.getItem(CLAVE) ?? '');
-    if (Array.isArray(g.pacientes) && Array.isArray(g.huecos) && Array.isArray(g.campanas) && g.config) return g;
+    if (Array.isArray(g.pacientes) && Array.isArray(g.citas) && Array.isArray(g.campanas) && g.fechaCorte) return g;
   } catch {
     /* sin datos guardados */
   }
-  return datosDemo();
+  return null;
 }
 
-const mismaPersona = (a: Paciente, b: Paciente) =>
-  (!!a.telefono && soloDigitos(a.telefono) === soloDigitos(b.telefono)) || a.nombre.toLowerCase() === b.nombre.toLowerCase();
+// Primera vez: lee los 4 Excel reales de la clínica desde /public/datos
+export default function App() {
+  const [inicial, setInicial] = useState<Datos | null>(cargarGuardado);
+  const [error, setError] = useState('');
+  const cargar = () => {
+    setError('');
+    cargarDatosIniciales()
+      .then(setInicial)
+      .catch((e: Error) => setError(e.message));
+  };
+  useEffect(() => {
+    if (!inicial) cargar();
+  }, []);
+  if (inicial) return <Panel inicial={inicial} />;
+  return (
+    <div className="grid min-h-screen place-items-center bg-ink px-6 text-center text-white">
+      <div>
+        <Sonrisa size={44} className="mx-auto" />
+        <p className="wordmark mt-5 text-sm">BLISSENS</p>
+        {error ? (
+          <>
+            <p className="mt-4 text-sm text-white/70">No se pudieron leer los archivos de la clínica: {error}</p>
+            <div className="mt-4 flex justify-center gap-2">
+              <button onClick={cargar} className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-ink">
+                Reintentar
+              </button>
+              <button onClick={() => setInicial(datosVacios(hoyISO()))} className="rounded-full bg-white/10 px-5 py-2 text-sm font-semibold">
+                Subir los Excel a mano
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="mt-4 text-sm text-white/60">Leyendo la agenda, el arancel y los guiones…</p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface Aviso {
   texto: string;
@@ -36,10 +72,10 @@ interface Aviso {
   deshacer?: () => void;
 }
 
-export default function App() {
-  const hoy = hoyISO();
-  const [datos, setDatos] = useState(cargarGuardado);
+function Panel({ inicial }: { inicial: Datos }) {
+  const [datos, setDatos] = useState(inicial);
   const { pacientes, huecos, campanas, config } = datos;
+  const hoy = datos.fechaCorte; // fecha de trabajo (por defecto, el cierre de la agenda cargada)
   const [pantalla, setPantalla] = useState<Pantalla>('hoy');
   const [expediente, setExpediente] = useState<string | null>(null);
   const [contactando, setContactando] = useState<Paciente | null>(null);
@@ -125,28 +161,45 @@ export default function App() {
     setContactando(null);
   };
 
-  const agregarDeExcel = (r: ResultadoLectura) => {
-    let lista = [...pacientes];
-    let nuevos = 0;
+  // Nueva carga del Excel: se conserva lo trabajado (contactos, notas, procesos) cruzando por # Paciente
+  const agregarDeExcel = (c: Carga) => {
+    const previos = new Map(pacientes.map((p) => [p.idPaciente, p]));
     let actualizados = 0;
-    for (const n of r.pacientes) {
-      const i = lista.findIndex((v) => mismaPersona(n, v));
-      if (i < 0) {
-        lista = [n, ...lista];
-        nuevos++;
-      } else if (!(lista[i].caso === n.caso && lista[i].fechaEvento === n.fechaEvento)) {
-        // ya existía: su proceso anterior queda en el expediente y empieza uno nuevo
-        lista[i] = { ...nuevoCiclo(lista[i], n.caso, n.fechaEvento), tratamiento: n.tratamiento, valor: n.valor || lista[i].valor };
-        actualizados++;
-      }
-    }
-    const hs = r.huecos.filter((h) => !huecos.some((x) => x.fecha === h.fecha && x.hora === h.hora && x.especialista === h.especialista));
-    conDeshacer(`Agenda cargada: ${nuevos} nuevos, ${actualizados} actualizados, ${hs.length} espacios`, (d) => ({
-      ...d,
-      pacientes: lista,
-      huecos: [...d.huecos, ...hs],
+    const lista = c.pacientes.map((n): Paciente => {
+      const v = previos.get(n.idPaciente);
+      if (!v) return n;
+      actualizados++;
+      const base = { ...n, notas: v.notas, ciclos: v.ciclos, telefono: n.telefono || v.telefono, especialista: v.especialista };
+      if (v.caso === n.caso && v.fechaEvento === n.fechaEvento)
+        return { ...base, contactos: v.contactos, estado: v.estado === 'activo' ? n.estado : v.estado, motivo: v.motivo, recuperadoEl: v.recuperadoEl };
+      return v.contactos.length ? { ...base, ciclos: [...v.ciclos, { caso: v.caso, fechaEvento: v.fechaEvento, contactos: v.contactos, cierre: v.estado, motivo: v.motivo }] } : base;
+    });
+    const manuales = pacientes.filter((p) => p.origen === 'manual' && !lista.some((n) => n.idPaciente === p.idPaciente));
+    const nuevo = datosDesdeCarga(c, datos);
+    conDeshacer(`Agenda cargada: ${c.pacientes.length} pacientes (${actualizados} ya estaban), corte ${c.fechaCorte}`, () => ({
+      ...nuevo,
+      pacientes: [...manuales, ...lista],
     }));
     setPantalla('hoy');
+  };
+
+  const cambiarTelefono = (id: string, telefono: string) => {
+    cambiarPaciente(id, (p) => ({ ...p, telefono, segmento: telefono.startsWith('+57') ? p.segmento : 'internacional' }));
+    setContactando((c) => (c && c.id === id ? { ...c, telefono } : c));
+    setAviso({ texto: 'Celular guardado' });
+  };
+
+  // RF-10: viaje del Dr. Olarte → el paciente pasa a la agenda de la Dra. Sara
+  const reasignar = (id: string) => {
+    conDeshacer('Paciente reasignado a la Dra. Sara López', (d) => ({
+      ...d,
+      pacientes: d.pacientes.map((p) =>
+        p.id === id
+          ? { ...p, especialista: 'Dra. Sara López', notas: [...p.notas, { fecha: hoy, texto: 'Reasignado del Dr. Juan Manuel Olarte a la Dra. Sara López por viaje del doctor.' }] }
+          : p
+      ),
+    }));
+    setContactando((c) => (c && c.id === id ? { ...c, especialista: 'Dra. Sara López' } : c));
   };
 
   const asignarHueco = (huecoId: string, pacienteId: string) => {
@@ -165,7 +218,7 @@ export default function App() {
                 recuperadoEl: hoy,
                 contactos: [
                   ...x.contactos,
-                  { fecha: hoy, paso: pasoActual(x) ?? 15, resultado: 'agendo', mensaje: `(asignado a la agenda abierta ${h.fecha} ${h.hora})`, huecoId },
+                  { fecha: hoy, paso: pasoActual(x, hoy) ?? 15, resultado: 'agendo', mensaje: `(asignado a la agenda libre ${h.fecha} ${h.hora})`, huecoId },
                 ],
               }
             : x
@@ -180,7 +233,7 @@ export default function App() {
     const p = pacientes.find((x) => x.id === h.ocupadoPor);
     conDeshacer(`Asignación revertida${p ? `: ${p.nombre.split(' ')[0]} vuelve a seguimiento` : ''}`, (d) => ({
       ...d,
-      huecos: d.huecos.map((x) => (x.id === huecoId ? { ...x, ocupadoPor: undefined, asignadoEl: undefined, estadoPrevio: undefined, asistencia: undefined } : x)),
+      huecos: d.huecos.map((x) => (x.id === huecoId ? { ...x, ocupadoPor: undefined, asignadoEl: undefined, estadoPrevio: undefined, asistencia: undefined, confirmadoEl: undefined, ofertas: x.ofertas.filter((o) => o.pacienteId !== x.ocupadoPor) } : x)),
       pacientes: d.pacientes.map((x) =>
         x.id === h.ocupadoPor
           ? { ...x, estado: h.estadoPrevio ?? 'pendiente', recuperadoEl: undefined, contactos: x.contactos.filter((c) => c.huecoId !== huecoId) }
@@ -206,10 +259,25 @@ export default function App() {
       ),
     }));
 
+  const rechazarOferta = (huecoId: string, pacienteId: string) =>
+    setDatos((d) => ({
+      ...d,
+      huecos: d.huecos.map((x) => (x.id === huecoId ? { ...x, ofertas: x.ofertas.map((o) => (o.pacienteId === pacienteId ? { ...o, rechazo: true } : o)) } : x)),
+    }));
+
+  const confirmarHueco = (huecoId: string) => {
+    setDatos((d) => ({ ...d, huecos: d.huecos.map((x) => (x.id === huecoId ? { ...x, confirmadoEl: hoy } : x)) }));
+    setAviso({ texto: 'Cita confirmada', exito: true });
+  };
+
   const restaurar = () => {
-    if (!confirm('Se borrarán los cambios y se cargarán los datos de ejemplo. ¿Continuar?')) return;
-    setDatos(datosDemo());
-    setPantalla('hoy');
+    if (!confirm('Se borrará lo registrado en el panel y se volverán a leer los 4 Excel de la clínica. ¿Continuar?')) return;
+    cargarDatosIniciales()
+      .then((d) => {
+        setDatos(d);
+        setPantalla('hoy');
+      })
+      .catch((e: Error) => setAviso({ texto: e.message }));
   };
 
   const abrirExpediente = (id: string) => {
@@ -228,7 +296,7 @@ export default function App() {
         { id: 'cargar', t: 'Cargar agenda', icono: FileSpreadsheet },
       ],
     },
-    { rol: 'recepcion', items: [{ id: 'agenda', t: 'Agenda abierta', icono: CalendarClock, n: huecos.filter((h) => h.fecha >= hoy && !h.ocupadoPor).length }] },
+    { rol: 'recepcion', items: [{ id: 'agenda', t: 'Agenda libre', icono: CalendarClock, n: huecos.filter((h) => h.fecha >= hoy && !h.ocupadoPor).length }] },
     { rol: 'mercadeo', items: [{ id: 'campanas', t: 'Campañas', icono: Megaphone }] },
     { rol: 'direccion', items: [{ id: 'indicadores', t: 'Indicadores', icono: BarChart3 }] },
   ];
@@ -285,9 +353,27 @@ export default function App() {
           <span className={`size-2 rounded-full ${apiConectada(config) ? 'bg-mint' : 'bg-white/30'}`} />
           WhatsApp: {apiConectada(config) ? 'API conectada' : 'modo simulación'}
         </p>
-        <p className="text-white/35">Sede El Tesoro · Medellín</p>
+        <label className="block text-white/50">
+          Fecha de trabajo
+          <span className="mt-1 flex items-center gap-2">
+            <input
+              type="date"
+              value={hoy}
+              onChange={(e) => e.target.value && setDatos((d) => ({ ...d, fechaCorte: e.target.value }))}
+              className="w-full rounded-lg bg-white/10 px-2 py-1 text-white [color-scheme:dark]"
+            />
+            <button onClick={() => setDatos((d) => ({ ...d, fechaCorte: hoyISO() }))} className="shrink-0 text-white/40 hover:text-white" title="Usar la fecha de hoy">
+              Hoy
+            </button>
+          </span>
+        </label>
+        <label className="block text-white/50">
+          Asesora que firma los guiones
+          <input value={datos.asesora} onChange={(e) => setDatos((d) => ({ ...d, asesora: e.target.value }))} className="mt-1 w-full rounded-lg bg-white/10 px-2 py-1 text-white" />
+        </label>
+        <p className="text-white/35">El Tesoro · Torre Médica 2 · Cons. 1157</p>
         <button onClick={restaurar} className="text-white/35 underline-offset-2 hover:text-white/70 hover:underline">
-          Restaurar datos de ejemplo
+          Volver a leer los Excel de la clínica
         </button>
       </div>
     </div>
@@ -346,7 +432,7 @@ export default function App() {
               }}
             />
           )}
-          {pantalla === 'cargar' && <Cargar hoy={hoy} onAgregar={agregarDeExcel} />}
+          {pantalla === "cargar" && <Cargar onAgregar={agregarDeExcel} />}
           {pantalla === 'agenda' && (
             <Agenda
               pacientes={pacientes}
@@ -355,10 +441,14 @@ export default function App() {
               onAsignar={asignarHueco}
               onRevertir={revertirHueco}
               onOfrecer={ofrecerHueco}
+              onRechazar={rechazarOferta}
+              onConfirmar={confirmarHueco}
               onAsistencia={marcarAsistencia}
+              asesora={datos.asesora}
+              onReasignar={reasignar}
               onAbrir={abrirExpediente}
               onAgregar={(h: Hueco) => setDatos((d) => ({ ...d, huecos: [...d.huecos, h] }))}
-              onBorrar={(id) => conDeshacer('Espacio eliminado', (d) => ({ ...d, huecos: d.huecos.filter((h) => h.id !== id) }))}
+              onBorrar={(id) => conDeshacer('Cupo eliminado', (d) => ({ ...d, huecos: d.huecos.filter((h) => h.id !== id) }))}
             />
           )}
           {pantalla === 'campanas' && (
@@ -380,7 +470,15 @@ export default function App() {
         </div>
       </main>
 
-      <Contactar paciente={contactando} onCerrar={() => setContactando(null)} onGuardar={guardarContacto} />
+      <Contactar
+        paciente={contactando}
+        hoy={hoy}
+        asesora={datos.asesora}
+        onCerrar={() => setContactando(null)}
+        onGuardar={guardarContacto}
+        onTelefono={cambiarTelefono}
+        onReasignar={reasignar}
+      />
 
       {aviso && (
         <div

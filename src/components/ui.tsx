@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { Estado, Paciente } from '../types';
-import { ESTADO_TXT, SEGMENTO_TXT, altoValor, type Semaforo } from '../lib/reglas';
+import { ESTADO_TXT, SEGMENTO_TXT, altoValor, fechaCorta, riesgoAlto, type Semaforo } from '../lib/reglas';
 import { ROLES, type Rol } from '../lib/roles';
 
 export const SEMAFORO_TXT: Record<Semaforo, string> = {
   rojo: 'Urgente',
   amarillo: 'Seguimiento',
-  verde: 'Primer contacto',
+  verde: 'Rescate',
 };
 const SEMAFORO_BG: Record<Semaforo, string> = { rojo: 'bg-rojo', amarillo: 'bg-amarillo', verde: 'bg-verde' };
 
@@ -26,20 +26,102 @@ export function Etiqueta({ children, tono = 'claro' }: { children: ReactNode; to
   return <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${t}`}>{children}</span>;
 }
 
-export function EtiquetaSegmento({ p }: { p: Paciente }) {
-  if (p.segmento === 'local') return altoValor(p) ? <Etiqueta tono="iris">Alto valor</Etiqueta> : null;
-  return <Etiqueta tono="iris">{SEGMENTO_TXT[p.segmento]}</Etiqueta>;
+// ---------- insignias del paciente ----------
+// Solo dos cosas se muestran como insignia: VIP (degradado) y riesgo alto. El resto va en la línea de datos (Meta).
+
+const motivoVIP = (p: Paciente) => {
+  const r = p.etiquetas.filter((e) => e !== 'VIP');
+  return r.length ? `VIP por ${r.join(', ').toLowerCase()}` : 'VIP: plan de alto valor';
+};
+
+export const textoRiesgo = (p: Paciente) =>
+  `${p.fallosSeguidos} ${p.fallosSeguidos === 1 ? 'cita seguida' : 'citas seguidas'} sin asistir desde ${p.ultimaAtendida ? `su última visita (${fechaCorta(p.ultimaAtendida)})` : 'que llegó (nunca ha asistido)'} · ${p.fallosHistoricos} en todo su historial`;
+
+export function InsigniaVIP({ p }: { p: Paciente }) {
+  if (p.segmento !== 'local')
+    return (
+      <span className="iris inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-ink" title={motivoVIP(p)}>
+        {SEGMENTO_TXT[p.segmento]}
+      </span>
+    );
+  if (!p.etiquetas.includes('VIP') && !altoValor(p)) return null;
+  return (
+    <span className="iris inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-ink" title={motivoVIP(p)}>
+      VIP
+    </span>
+  );
+}
+
+// RN-06: 3+ citas seguidas sin asistir = doble confirmación 24 h antes
+export function InsigniaRiesgo({ p, oscuro = false, detalle = false }: { p: Paciente; oscuro?: boolean; detalle?: boolean }) {
+  if (!riesgoAlto(p) && !(detalle && p.nivelRiesgo === 'Medio')) return null;
+  const alto = riesgoAlto(p);
+  const cls = alto
+    ? oscuro
+      ? 'bg-rojo/25 text-[#ffb4b7] ring-1 ring-rojo/40'
+      : 'bg-rojo/[.08] text-rojo ring-1 ring-rojo/25'
+    : oscuro
+      ? 'bg-white/10 text-white/75'
+      : 'bg-amarillo/10 text-amarillo ring-1 ring-amarillo/25';
+  return (
+    <span className={`inline-flex cursor-help items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${cls}`} title={textoRiesgo(p)}>
+      <span className={`size-1.5 rounded-full ${alto ? 'bg-rojo' : 'bg-amarillo'}`} />
+      {alto ? 'Riesgo alto' : 'Riesgo medio'}
+      {detalle && <span className="font-normal opacity-80">· {p.fallosSeguidos} seguidas</span>}
+    </span>
+  );
+}
+
+export function Insignias({ p, oscuro = false, detalle = false }: { p: Paciente; oscuro?: boolean; detalle?: boolean }) {
+  return (
+    <>
+      <InsigniaVIP p={p} />
+      <InsigniaRiesgo p={p} oscuro={oscuro} detalle={detalle} />
+    </>
+  );
+}
+
+// Línea de datos discreta: # paciente · nuevo/antiguo · etiquetas · doctor · aviso de celular
+export function Meta({ p, doctor = true, oscuro = false, className = '' }: { p: Paciente; doctor?: boolean; oscuro?: boolean; className?: string }) {
+  const partes = [p.idPaciente, p.antiguedad === 'Nuevo' ? 'Paciente nuevo' : 'Antiguo', ...p.etiquetas.filter((e) => e !== 'VIP'), doctor ? p.especialista : ''].filter(Boolean);
+  return (
+    <span className={`text-xs ${oscuro ? 'text-white/55' : 'text-muted'} ${className}`}>
+      {partes.join(' · ')}
+      {!p.telefono && <span className="font-semibold text-amarillo"> · Sin celular</span>}
+    </span>
+  );
+}
+
+// Qué cuenta como fallo (se abre al hacer clic, sin ventanas emergentes)
+export function QueEsFallo({ className = '' }: { className?: string }) {
+  return (
+    <details className={`group text-xs ${className}`}>
+      <summary className="cursor-pointer list-none font-semibold text-ink/70 underline decoration-dotted underline-offset-2 hover:text-ink">¿Qué cuenta como fallo?</summary>
+      <div className="hoja mt-2 space-y-1.5 rounded-2xl bg-soft p-3 leading-relaxed text-ink/80">
+        <p>
+          <b>Fallo</b> es una cita que no se cumplió: <i>Cambio de fecha, Anulado, Anulado por WhatsApp, No asiste</i> o <i>No confirmado</i>.
+        </p>
+        <p>
+          El <b>riesgo</b> se calcula con los fallos <b>seguidos desde la última vez que asistió</b>. Si un paciente falló, volvió y siguió viniendo, esos fallos
+          viejos ya no suben su riesgo: quedan solo como historial.
+        </p>
+        <p>
+          <b>Alto:</b> 3 o más seguidas sin asistir (doble confirmación 24 h antes). <b>Medio:</b> 1 o 2 seguidas, o reprograma mucho (3+ en total) aunque sí viene.
+        </p>
+      </div>
+    </details>
+  );
 }
 
 export function EtiquetaEstado({ estado }: { estado: Estado }) {
-  const tono = estado === 'recuperado' ? 'ok' : estado === 'descartado' ? 'mal' : estado === 'pendiente' ? 'oscuro' : 'claro';
+  const tono = estado === 'recuperado' || estado === 'activo' ? 'ok' : estado === 'descartado' ? 'mal' : estado === 'pendiente' ? 'oscuro' : 'claro';
   return <Etiqueta tono={tono}>{ESTADO_TXT[estado]}</Etiqueta>;
 }
 
 export function Iniciales({ nombre, claro = false, grande = false }: { nombre: string; claro?: boolean; grande?: boolean }) {
   const ini = nombre
     .split(' ')
-    .filter(Boolean)
+    .filter((w) => w && !['de', 'del', 'la', 'los'].includes(w.toLowerCase()))
     .slice(0, 2)
     .map((w) => w[0])
     .join('');

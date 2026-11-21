@@ -1,17 +1,35 @@
 // Caso por el que el paciente aparece en la lista
-export type Caso = 'cancelo' | 'no_asistio' | 'diagnostico' | 'limpieza';
+export type Caso = 'cancelo' | 'no_asistio' | 'diagnostico' | 'pausa' | 'limpieza';
 export type Segmento = 'local' | 'internacional' | 'deportista';
-export type Estado = 'pendiente' | 'recuperado' | 'descartado' | 'agotado';
+// activo = tiene cita confirmada (segmento 4 del SRS): no entra a la bandeja
+export type Estado = 'pendiente' | 'recuperado' | 'descartado' | 'agotado' | 'activo';
 export type Resultado = 'agendo' | 'sin_respuesta' | 'lo_pensara' | 'no_interesa';
 export type Motivo = 'costos' | 'agenda' | 'viaje' | 'miedo' | 'salud' | 'otro' | 'sin_dato';
+export type Grupo = 1 | 2 | 3 | 4; // segmentos del SRS
+export type Antiguedad = 'Nuevo' | 'Antiguo';
+export type NivelRiesgo = 'Bajo' | 'Medio' | 'Alto';
+export type Profesional = 'Dra. Sara López' | 'Dr. Juan Manuel Olarte';
+
+// Una cita real de la agenda exportada del software
+export interface Cita {
+  id: number; // # Cita
+  paciente: number; // # Paciente
+  fecha: string; // YYYY-MM-DD
+  hora?: string; // HH:MM (solo viene en el archivo de detalle)
+  estado: string; // texto original del software
+  tipo: 'Diagnóstico' | 'Tratamiento';
+  profesional: Profesional;
+  comentario?: string;
+  orden: number; // posición en el Excel: en un mismo día, la primera fila es la más reciente
+}
 
 export interface Contacto {
-  fecha: string; // YYYY-MM-DD
+  fecha: string;
   paso: 3 | 7 | 15;
   resultado: Resultado;
   mensaje: string;
   nota?: string;
-  huecoId?: string; // si el "agendó" vino de asignarle un espacio de la agenda abierta
+  huecoId?: string;
 }
 
 export interface Nota {
@@ -19,7 +37,6 @@ export interface Nota {
   texto: string;
 }
 
-// Proceso 3-7-15 ya cerrado (el paciente volvió a caer en la lista después)
 export interface Ciclo {
   caso: Caso;
   fechaEvento: string;
@@ -30,35 +47,48 @@ export interface Ciclo {
 
 export interface Paciente {
   id: string;
+  idPaciente: string; // "#36"
   nombre: string;
-  telefono: string;
+  telefono: string; // +57... o vacío
+  email: string;
+  apoderado: string;
   ciudad: string;
   segmento: Segmento;
+  antiguedad: Antiguedad;
+  etiquetas: string[]; // VIP, Valoración virtual, Rehabilitación, Alineadores, Convenio FLAIRES
+  grupo: Grupo;
+  fallosHistoricos: number; // todas las citas sin cumplir del historial
+  fallosSeguidos: number; // sin cumplir desde la última vez que asistió (define el riesgo)
+  ultimaAtendida?: string;
+  nivelRiesgo: NivelRiesgo;
   caso: Caso;
-  fechaEvento: string; // día de la cancelación, inasistencia, diagnóstico o vencimiento del control
+  fechaEvento: string; // desde cuándo corre la regla 3-7-15
+  ultimaCita?: { fecha: string; hora?: string; estado: string; tipo: string };
   tratamiento: string;
-  especialista: string;
-  valor: number; // COP
+  especialista: Profesional;
+  valor: number; // COP estimado con el arancel
+  valorReferencia?: { acciones: string[]; fuente: 'comentario' | 'tipo de cita' }; // de dónde sale el valor
   motivo: Motivo;
   estado: Estado;
   contactos: Contacto[];
   recuperadoEl?: string;
   notas: Nota[];
   ciclos: Ciclo[];
-  origen: 'demo' | 'excel' | 'manual';
+  origen: 'excel' | 'manual';
   creadoEl: string;
 }
 
 export interface Hueco {
   id: string;
-  fecha: string; // YYYY-MM-DD
-  hora: string; // HH:MM
+  fecha: string;
+  hora: string;
   minutos: number;
-  especialista: string;
-  ocupadoPor?: string; // id paciente
+  especialista: Profesional;
+  ocupadoPor?: string;
   asignadoEl?: string;
-  estadoPrevio?: Estado; // para poder revertir la asignación
-  ofertas: { pacienteId: string; fecha: string }[];
+  estadoPrevio?: Estado;
+  ofertas: { pacienteId: string; fecha: string; rechazo?: boolean }[]; // a quién se le ofreció y si dijo que no
+  confirmadoEl?: string; // confirmación 24 h antes
   asistencia?: 'asistio' | 'no_asistio';
 }
 
@@ -70,7 +100,7 @@ export interface Envio {
   telefono: string;
   texto: string;
   estado: EstadoEnvio;
-  fecha?: string; // ISO con hora
+  fecha?: string;
   error?: string;
 }
 
@@ -79,9 +109,9 @@ export interface Campana {
   nombre: string;
   audiencia: string;
   plantilla: string;
-  creadaEl: string; // ISO
-  inicio: string; // ISO: cuándo empieza a enviar
-  ritmoSeg: number; // pausa entre mensajes
+  creadaEl: string;
+  inicio: string;
+  ritmoSeg: number;
   canal: 'api' | 'simulado';
   estado: 'programada' | 'enviando' | 'pausada' | 'completada' | 'cancelada';
   envios: Envio[];
@@ -90,15 +120,19 @@ export interface Campana {
 export interface ConfigWA {
   token: string;
   phoneId: string;
-  plantilla: string; // nombre de plantilla aprobada en Meta (opcional)
+  plantilla: string;
   idioma: string;
 }
 
 export interface Datos {
   pacientes: Paciente[];
+  citas: Cita[];
   huecos: Hueco[];
   campanas: Campana[];
   config: ConfigWA;
+  asesora: string; // quien firma los guiones: [ASESOR/A]
+  fechaCorte: string; // fecha de trabajo: por defecto, el cierre de la agenda cargada
+  archivos: string[];
 }
 
 export type Pantalla = 'hoy' | 'pacientes' | 'agenda' | 'campanas' | 'indicadores' | 'cargar';

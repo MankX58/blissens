@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Datos personales de pacientes (Excel reales de la clínica)
+public/datos/
+
+# Base de datos con datos de pacientes
+backend/*.db
+backend/*.db-*

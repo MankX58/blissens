@@ -1,11 +1,13 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { ArrowLeft, CalendarCheck, Flag, Megaphone, MessageCircle, MessagesSquare, Plus, RotateCcw, Search, StickyNote, UserMinus } from 'lucide-react';
-import type { Caso, Datos, Estado, Paciente, Segmento } from '../types';
-import { ESPECIALISTAS } from '../data/demo';
+import type { Antiguedad, Caso, Datos, Estado, Grupo, Paciente, Profesional, Segmento } from '../types';
 import { lineaDeTiempo, type TipoEvento } from '../lib/expediente';
 import {
   CASO_TXT,
+  ESPECIALISTAS,
   ESTADO_TXT,
+  GRUPO_TXT,
+  normalizarCelular,
   MOTIVO_TXT,
   PASOS,
   RESULTADO_TXT,
@@ -18,10 +20,10 @@ import {
   sumarDias,
   ultimoContacto,
 } from '../lib/reglas';
-import { Cifra, Encabezado, EtiquetaEstado, EtiquetaSegmento, Iniciales, Modal, Pestanas, Vacio, btnBorde, btnIris, btnNegro } from '../components/ui';
+import { Cifra, Encabezado, EtiquetaEstado, Iniciales, Insignias, Meta, Modal, Pestanas, QueEsFallo, Vacio, btnBorde, btnIris, btnNegro, textoRiesgo } from '../components/ui';
 
 type FiltroEstado = 'todos' | Estado;
-type Orden = 'valor' | 'reciente' | 'nombre';
+type Orden = 'valor' | 'reciente' | 'nombre' | 'fallos';
 
 export function Pacientes({
   datos,
@@ -66,6 +68,10 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
   const [estado, setEstado] = useState<FiltroEstado>('todos');
   const [caso, setCaso] = useState<Caso | ''>('');
   const [segmento, setSegmento] = useState<Segmento | ''>('');
+  const [grupo, setGrupo] = useState<Grupo | 0>(0);
+  const [antiguedad, setAntiguedad] = useState<Antiguedad | ''>('');
+  const [riesgo, setRiesgo] = useState(false);
+  const [etiqueta, setEtiqueta] = useState('');
   const [orden, setOrden] = useState<Orden>('reciente');
   const [q, setQ] = useState('');
   const [nuevo, setNuevo] = useState(false);
@@ -79,16 +85,22 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
           (estado === 'todos' || p.estado === estado) &&
           (!caso || p.caso === caso) &&
           (!segmento || p.segmento === segmento) &&
-          (!t || p.nombre.toLowerCase().includes(t) || p.telefono.includes(t) || p.tratamiento.toLowerCase().includes(t))
+          (!grupo || p.grupo === grupo) &&
+          (!antiguedad || p.antiguedad === antiguedad) &&
+          (!riesgo || p.fallosSeguidos >= 3) &&
+          (!etiqueta || (etiqueta === 'sincel' ? !p.telefono : p.etiquetas.includes(etiqueta))) &&
+          (!t || p.nombre.toLowerCase().includes(t) || p.idPaciente.includes(t) || p.telefono.includes(t) || p.email.toLowerCase().includes(t) || p.tratamiento.toLowerCase().includes(t))
       )
       .sort((a, b) =>
         orden === 'valor'
           ? b.valor - a.valor
           : orden === 'nombre'
             ? a.nombre.localeCompare(b.nombre)
+            : orden === 'fallos'
+              ? b.fallosSeguidos - a.fallosSeguidos || b.fallosHistoricos - a.fallosHistoricos
             : (ultimoContacto(b)?.fecha ?? b.fechaEvento).localeCompare(ultimoContacto(a)?.fecha ?? a.fechaEvento)
       );
-  }, [pacientes, estado, caso, segmento, orden, q]);
+  }, [pacientes, estado, caso, segmento, grupo, antiguedad, riesgo, etiqueta, orden, q]);
 
   return (
     <div>
@@ -112,11 +124,12 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
             ['recuperado', `Recuperados · ${n('recuperado')}`],
             ['agotado', `Sin respuesta · ${n('agotado')}`],
             ['descartado', `No les interesa · ${n('descartado')}`],
+            ['activo', `Activos con cita · ${n('activo')}`],
           ]}
         />
         <label className="relative lg:w-72">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nombre, celular o tratamiento" className="field rounded-full pl-10" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nombre, # paciente, celular, correo" className="field rounded-full pl-10" />
         </label>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -128,6 +141,32 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
             </option>
           ))}
         </select>
+        <select value={grupo} onChange={(e) => setGrupo(Number(e.target.value) as Grupo | 0)} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Segmento del SRS">
+          <option value={0}>Los 4 segmentos</option>
+          {([1, 2, 3, 4] as Grupo[]).map((g) => (
+            <option key={g} value={g}>
+              {g}. {GRUPO_TXT[g]}
+            </option>
+          ))}
+        </select>
+        <select value={antiguedad} onChange={(e) => setAntiguedad(e.target.value as Antiguedad | '')} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Antigüedad">
+          <option value="">Nuevos y antiguos</option>
+          <option value="Nuevo">Nuevos</option>
+          <option value="Antiguo">Antiguos</option>
+        </select>
+        <select value={etiqueta} onChange={(e) => setEtiqueta(e.target.value)} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Etiqueta">
+          <option value="">Todas las etiquetas</option>
+          {['VIP', 'Valoración virtual', 'Rehabilitación', 'Alineadores', 'Convenio FLAIRES'].map((e) => (
+            <option key={e}>{e}</option>
+          ))}
+          <option value="sincel">⚠️ Sin celular</option>
+        </select>
+        <button
+          onClick={() => setRiesgo((r) => !r)}
+          className={`rounded-full px-3 py-1.5 text-xs font-semibold ${riesgo ? 'bg-rojo text-white' : 'bg-card text-ink/70 ring-1 ring-line'}`}
+        >
+          Riesgo alto
+        </button>
         <select value={segmento} onChange={(e) => setSegmento(e.target.value as Segmento | '')} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Segmento">
           <option value="">Todos los segmentos</option>
           {Object.entries(SEGMENTO_TXT).map(([k, v]) => (
@@ -140,6 +179,7 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
           <option value="reciente">Movimiento más reciente</option>
           <option value="valor">Mayor valor</option>
           <option value="nombre">Nombre A-Z</option>
+          <option value="fallos">Más fallos históricos</option>
         </select>
       </div>
 
@@ -151,7 +191,7 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
             </span>
           ))}
         </div>
-        <ul key={estado + caso + segmento + orden} className="escalonado divide-y divide-line">
+        <ul key={estado + caso + segmento + grupo + antiguedad + etiqueta + orden} className="escalonado divide-y divide-line">
           {visibles.map((p) => (
             <li key={p.id}>
               <button
@@ -162,7 +202,7 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
                   <Iniciales nombre={p.nombre} />
                   <span className="min-w-0">
                     <span className="block truncate font-semibold">{p.nombre}</span>
-                    <span className="block truncate text-xs text-muted">{p.ciudad}</span>
+                    <Meta p={p} className="block truncate" />
                   </span>
                 </span>
                 <span className="min-w-0 text-sm">
@@ -172,7 +212,7 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
                 <MiniProceso p={p} />
                 <span className="flex flex-wrap gap-1">
                   <EtiquetaEstado estado={p.estado} />
-                  <EtiquetaSegmento p={p} />
+                  <Insignias p={p} />
                 </span>
                 <span className="num text-sm font-semibold md:text-right">{p.valor ? pesosCorto(p.valor) : '—'}</span>
               </button>
@@ -210,6 +250,7 @@ function MiniProceso({ p }: { p: Paciente }) {
 
 // ---------------- expediente ----------------
 const ICONO: Record<TipoEvento, typeof Flag> = {
+  cita: CalendarCheck,
   evento: Flag,
   contacto: MessagesSquare,
   agenda: CalendarCheck,
@@ -238,7 +279,7 @@ function Expediente({
   onDescartar: (id: string) => void;
 }) {
   const [nota, setNota] = useState('');
-  const eventos = lineaDeTiempo(p, datos.huecos, datos.campanas);
+  const eventos = lineaDeTiempo(p, datos.huecos, datos.campanas, datos.citas);
   const intentos = p.contactos.length + p.ciclos.reduce((s, c) => s + c.contactos.length, 0);
   const diasProceso = diasEntre(p.fechaEvento, p.recuperadoEl ?? hoy);
   const citas = datos.huecos.filter((h) => h.ocupadoPor === p.id).length;
@@ -257,11 +298,11 @@ function Expediente({
             <div className="min-w-0">
               <div className="flex flex-wrap gap-1.5">
                 <EtiquetaEstado estado={p.estado} />
-                <EtiquetaSegmento p={p} />
+                <Insignias p={p} oscuro detalle />
               </div>
               <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">{p.nombre}</h1>
               <p className="mt-1 text-sm text-white/55">
-                {p.ciudad} · {p.telefono || 'Sin celular'}
+                {p.idPaciente} · {p.telefono || '⚠️ Sin celular'} {p.email && `· ${p.email}`}
               </p>
             </div>
           </div>
@@ -293,7 +334,7 @@ function Expediente({
         <Dato k="Valor del plan" v={<Cifra valor={p.valor} formato={(n) => (p.valor ? pesosCorto(n) : '—')} />} />
         <Dato k={p.estado === 'recuperado' ? 'Días hasta recuperarlo' : 'Días en proceso'} v={<Cifra valor={diasProceso} />} />
         <Dato k="Intentos de contacto" v={<Cifra valor={intentos} />} />
-        <Dato k="Citas por agenda abierta" v={<Cifra valor={citas} />} />
+        <Dato k="Citas por agenda libre" v={<Cifra valor={citas} />} />
       </dl>
 
       {/* proceso actual */}
@@ -321,15 +362,28 @@ function Expediente({
           <section className="entrar card p-6">
             <h2 className="kicker">Datos</h2>
             <dl className="mt-3 space-y-3 text-sm">
-              <Fila k="Tratamiento" v={p.tratamiento} />
+              <Fila k="Segmento SRS" v={`${p.grupo}. ${GRUPO_TXT[p.grupo]}`} />
+              <Fila k="Riesgo de inasistencia" v={p.nivelRiesgo} />
+              <Fila k="Seguidas sin asistir" v={String(p.fallosSeguidos)} />
+              <Fila k="Fallos en todo el historial" v={String(p.fallosHistoricos)} />
+              <Fila k="Última vez que asistió" v={p.ultimaAtendida ? fechaCorta(p.ultimaAtendida) : 'Nunca'} />
+              <Fila k="Antigüedad" v={p.antiguedad} />
+              {p.ultimaCita && <Fila k="Última cita" v={`${fechaCorta(p.ultimaCita.fecha)} · ${p.ultimaCita.estado}`} />}
+              <Fila k="Comentario / tratamiento" v={p.tratamiento} />
               <Fila k="Especialista" v={p.especialista} />
               <Fila k="Motivo registrado" v={MOTIVO_TXT[p.motivo]} />
-              <Fila k="Segmento" v={SEGMENTO_TXT[p.segmento]} />
-              {p.valor > 0 && <Fila k="Valor exacto" v={pesos(p.valor)} />}
-              <Fila k="Origen" v={{ demo: 'Datos de ejemplo', excel: 'Agenda en Excel', manual: 'Registro manual' }[p.origen]} />
+              <Fila k="Correo" v={p.email || '—'} />
+              {p.apoderado && <Fila k="Apoderado" v={p.apoderado} />}
+              {p.valor > 0 && <Fila k="Valor estimado (arancel)" v={pesos(p.valor)} />}
+              {p.valorReferencia && <Fila k="Calculado con" v={`${p.valorReferencia.acciones.join(' + ')} (por ${p.valorReferencia.fuente})`} />}
+              <Fila k="Origen" v={{ excel: 'Agenda en Excel', manual: 'Registro manual' }[p.origen]} />
               <Fila k="En el panel desde" v={fechaCorta(p.creadoEl)} />
               {p.ciclos.length > 0 && <Fila k="Procesos anteriores" v={String(p.ciclos.length)} />}
             </dl>
+            <p className="mt-4 text-xs text-muted" title={textoRiesgo(p)}>
+              {textoRiesgo(p)}.
+            </p>
+            <QueEsFallo className="mt-2" />
           </section>
           <section className="entrar card p-6">
             <h2 className="kicker">Nota interna</h2>
@@ -430,8 +484,9 @@ function NuevoPaciente({ abierto, hoy, onCerrar, onCrear }: { abierto: boolean; 
     caso: 'cancelo' as Caso,
     fechaEvento: hoy,
     tratamiento: '',
-    especialista: ESPECIALISTAS[0],
+    especialista: ESPECIALISTAS[0] as Profesional,
     valor: '',
+    email: '',
   });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   return (
@@ -440,11 +495,21 @@ function NuevoPaciente({ abierto, hoy, onCerrar, onCrear }: { abierto: boolean; 
         className="p-6 sm:p-8"
         onSubmit={(e) => {
           e.preventDefault();
+          const id = Date.now();
           onCrear({
-            id: `m-${Date.now()}`,
+            id: `m-${id}`,
+            idPaciente: `#M-${String(id).slice(-5)}`,
             nombre: f.nombre.trim(),
-            telefono: f.telefono.trim(),
-            ciudad: f.ciudad.trim() || 'Medellín',
+            telefono: normalizarCelular(f.telefono),
+            email: f.email.trim(),
+            apoderado: '',
+            antiguedad: 'Nuevo',
+            etiquetas: [],
+            grupo: f.caso === 'diagnostico' ? 2 : f.caso === 'pausa' || f.caso === 'limpieza' ? 3 : 1,
+            fallosHistoricos: f.caso === 'cancelo' || f.caso === 'no_asistio' ? 1 : 0,
+            fallosSeguidos: f.caso === 'cancelo' || f.caso === 'no_asistio' ? 1 : 0,
+            nivelRiesgo: f.caso === 'cancelo' || f.caso === 'no_asistio' ? 'Medio' : 'Bajo',
+            ciudad: f.ciudad.trim(),
             segmento: f.segmento,
             caso: f.caso,
             fechaEvento: f.fechaEvento,
@@ -503,6 +568,9 @@ function NuevoPaciente({ abierto, hoy, onCerrar, onCrear }: { abierto: boolean; 
           </L>
           <L t="Valor del plan (COP)">
             <input inputMode="numeric" value={f.valor} onChange={set('valor')} className="field" placeholder="0" />
+          </L>
+          <L t="Correo">
+            <input type="email" value={f.email} onChange={set('email')} className="field" />
           </L>
           <L t="Ciudad o país">
             <input value={f.ciudad} onChange={set('ciudad')} className="field" />
