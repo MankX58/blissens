@@ -95,7 +95,6 @@ export function Campanas({
   return (
     <div>
       <Encabezado
-        roles={['mercadeo']}
         titulo="Campañas automáticas"
         descripcion="Elige un grupo de pacientes, escribe un mensaje y el panel lo envía a todos por WhatsApp, uno tras otro, sin que tengas que hacerlo a mano."
       >
@@ -161,7 +160,7 @@ export function Campanas({
                     <button
                       key={c}
                       onClick={() => setCuando(c)}
-                      className={`rounded-full px-4 py-1.5 text-[13px] font-semibold ${cuando === c ? 'bg-white shadow-sm' : 'text-ink/55'}`}
+                      className={`rounded-full px-4 py-1.5 text-[13px] font-semibold ${cuando === c ? 'bg-white shadow-sm' : 'text-ink/65'}`}
                     >
                       {c === 'ahora' ? 'Enviar ahora' : 'Programar'}
                     </button>
@@ -191,7 +190,7 @@ export function Campanas({
             <div className="mt-3 rounded-[26px] bg-[#e9e2d6] p-4">
               <div className="ml-auto max-w-[92%] rounded-2xl rounded-tr-md bg-[#d9fdd3] px-4 py-3 text-[13.5px] leading-relaxed shadow-sm">
                 {elegidos[0] ? personalizar(plantilla, elegidos[0]) : plantilla}
-                <span className="mt-1 block text-right text-[10px] text-ink/40">
+                <span className="mt-1 block text-right text-[10px] text-ink/60">
                   {new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })} ✓✓
                 </span>
               </div>

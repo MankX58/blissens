@@ -66,7 +66,7 @@ export function Indicadores({ datos, hoy }: { datos: Datos; hoy: string }) {
 
   return (
     <div>
-      <Encabezado roles={['direccion']} titulo="Indicadores" descripcion="Lo que antes se veía al cierre de mes, ahora al día. Todas las cifras salen de las citas cargadas y de los registros del panel.">
+      <Encabezado titulo="Indicadores" descripcion="Lo que antes se veía al cierre de mes, ahora al día. Todas las cifras salen de las citas cargadas y de los registros del panel.">
         <button onClick={() => descargarHojas(tablas, `blissens-indicadores-${hoy}.xlsx`)} className={btnBorde}>
           <Download className="size-4" /> Descargar todo en Excel
         </button>

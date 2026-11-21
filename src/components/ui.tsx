@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { Estado, Paciente } from '../types';
 import { ESTADO_TXT, SEGMENTO_TXT, altoValor, fechaCorta, riesgoAlto, type Semaforo } from '../lib/reglas';
-import { ROLES, type Rol } from '../lib/roles';
 
 export const SEMAFORO_TXT: Record<Semaforo, string> = {
   rojo: 'Urgente',
@@ -127,6 +126,7 @@ export function Iniciales({ nombre, claro = false, grande = false }: { nombre: s
     .join('');
   return (
     <span
+      aria-hidden
       className={`grid shrink-0 place-items-center rounded-full font-semibold ${grande ? 'size-16 text-xl' : 'size-10 text-[13px]'} ${
         claro ? 'bg-white text-ink' : 'bg-ink text-white'
       }`}
@@ -136,41 +136,12 @@ export function Iniciales({ nombre, claro = false, grande = false }: { nombre: s
   );
 }
 
-export function RolChip({ rol, oscuro = false }: { rol: Rol; oscuro?: boolean }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-        oscuro ? 'bg-white/8 text-white/80' : 'bg-white text-ink/75 ring-1 ring-line'
-      }`}
-    >
-      <span className="size-2 rounded-full" style={{ background: ROLES[rol].color }} />
-      {ROLES[rol].nombre}
-    </span>
-  );
-}
-
 // Encabezado común: a quién le sirve la sección, título y acciones
-export function Encabezado({
-  roles,
-  titulo,
-  descripcion,
-  children,
-}: {
-  roles: Rol[];
-  titulo: ReactNode;
-  descripcion?: string;
-  children?: ReactNode;
-}) {
+export function Encabezado({ titulo, descripcion, children }: { titulo: ReactNode; descripcion?: string; children?: ReactNode }) {
   return (
     <header className="entrar flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
       <div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="kicker mr-1">Para</span>
-          {roles.map((r) => (
-            <RolChip key={r} rol={r} />
-          ))}
-        </div>
-        <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-[44px] sm:leading-[1.05]">{titulo}</h1>
+        <h1 className="text-3xl font-bold tracking-tight sm:text-[44px] sm:leading-[1.05]">{titulo}</h1>
         {descripcion && <p className="mt-2 max-w-2xl text-[15px] text-muted">{descripcion}</p>}
       </div>
       {children && <div className="flex flex-wrap gap-2">{children}</div>}
@@ -264,7 +235,7 @@ export function Pestanas<T extends string>({ valor, opciones, onCambio }: { valo
         <button
           key={id}
           onClick={() => onCambio(id)}
-          className={`shrink-0 rounded-full px-4 py-1.5 text-[13px] font-semibold ${valor === id ? 'bg-white text-ink shadow-sm' : 'text-ink/55 hover:text-ink'}`}
+          className={`shrink-0 rounded-full px-4 py-1.5 text-[13px] font-semibold ${valor === id ? 'bg-white text-ink shadow-sm' : 'text-ink/65 hover:text-ink'}`}
         >
           {t}
         </button>

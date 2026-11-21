@@ -52,7 +52,6 @@ export function Cargar({ onAgregar }: { onAgregar: (c: Carga) => void }) {
   return (
     <div>
       <Encabezado
-        roles={['auxiliar']}
         titulo="Carga la agenda del software"
         descripcion="Sube los Excel tal como salen del software (puedes soltar los 4 a la vez). El panel cruza las dos agendas por # Cita y # Paciente, agrupa las citas de cada paciente, lo clasifica en los 4 segmentos del SRS y estima su valor con el arancel."
       />

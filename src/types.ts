@@ -135,4 +135,4 @@ export interface Datos {
   archivos: string[];
 }
 
-export type Pantalla = 'hoy' | 'pacientes' | 'agenda' | 'campanas' | 'indicadores' | 'cargar';
+export type Pantalla = 'hoy' | 'pacientes' | 'agenda' | 'campanas' | 'indicadores' | 'cargar' | 'cuentas';

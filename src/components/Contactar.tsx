@@ -123,13 +123,13 @@ export function Contactar({
                 <li key={d} className="flex items-start gap-3 text-sm">
                   <span
                     className={`grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-bold ${
-                      c ? 'bg-white text-ink' : actual ? 'iris text-ink' : 'border border-white/20 text-white/40'
+                      c ? 'bg-white text-ink' : actual ? 'iris text-ink' : 'border border-white/20 text-white/60'
                     }`}
                   >
                     {c ? <Check className="size-3.5" /> : d}
                   </span>
                   <div className="leading-tight">
-                    <p className={actual ? 'font-semibold' : c ? 'text-white/85' : 'text-white/40'}>
+                    <p className={actual ? 'font-semibold' : c ? 'text-white/85' : 'text-white/60'}>
                       {d === 3 ? 'Urgente (0-3 días)' : d === 7 ? 'Seguimiento (día 7)' : 'Rescate (día 15)'}
                     </p>
                     <p className="text-xs text-white/50">
@@ -307,7 +307,7 @@ export function Contactar({
 function Dato({ k, v }: { k: string; v: string }) {
   return (
     <div>
-      <dt className="text-[11px] uppercase tracking-[.14em] text-white/45">{k}</dt>
+      <dt className="text-[11px] uppercase tracking-[.14em] text-white/65">{k}</dt>
       <dd className="mt-0.5 break-words text-white/90">{v}</dd>
     </div>
   );

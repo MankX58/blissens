@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { ArrowLeft, CalendarCheck, Flag, Megaphone, MessageCircle, MessagesSquare, Plus, RotateCcw, Search, StickyNote, UserMinus } from 'lucide-react';
+import { ArrowLeft, CalendarCheck, Flag, Megaphone, MessageCircle, MessagesSquare, Plus, RotateCcw, Search, SlidersHorizontal, StickyNote, UserMinus } from 'lucide-react';
 import type { Antiguedad, Caso, Datos, Estado, Grupo, Paciente, Profesional, Segmento } from '../types';
 import { lineaDeTiempo, type TipoEvento } from '../lib/expediente';
 import {
@@ -75,6 +75,15 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
   const [orden, setOrden] = useState<Orden>('reciente');
   const [q, setQ] = useState('');
   const [nuevo, setNuevo] = useState(false);
+  const activos = [caso, grupo, antiguedad, etiqueta, riesgo, segmento].filter(Boolean).length;
+  const limpiar = () => {
+    setCaso('');
+    setGrupo(0);
+    setAntiguedad('');
+    setEtiqueta('');
+    setRiesgo(false);
+    setSegmento('');
+  };
 
   const n = (e: Estado) => pacientes.filter((p) => p.estado === e).length;
   const visibles = useMemo(() => {
@@ -105,7 +114,6 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
   return (
     <div>
       <Encabezado
-        roles={['auxiliar', 'direccion']}
         titulo="Pacientes"
         descripcion="El expediente de seguimiento de cada paciente: por qué entró a la lista, cada intento de contacto, campañas, citas y notas."
       >
@@ -128,11 +136,20 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
           ]}
         />
         <label className="relative lg:w-72">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nombre, # paciente, celular, correo" className="field rounded-full pl-10" />
+          <span className="sr-only">Buscar paciente</span>
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nombre, # paciente, celular, correo" className="field rounded-full pl-10" />
         </label>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
+      {/* filtros secundarios plegados: la lista queda a la vista y se ve cuántos hay activos */}
+      <div className="mt-3 flex flex-wrap items-start gap-2">
+        <details className="group" open={activos > 0 || undefined}>
+          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-full bg-card px-3.5 py-2 text-xs font-semibold ring-1 ring-line hover:ring-ink/30 [&::-webkit-details-marker]:hidden">
+            <SlidersHorizontal className="size-3.5" aria-hidden />
+            Filtros
+            {activos > 0 && <span className="num rounded-full bg-ink px-1.5 text-[10px] leading-4 text-white">{activos}</span>}
+          </summary>
+          <div className="mt-2 flex flex-wrap gap-2">
         <select value={caso} onChange={(e) => setCaso(e.target.value as Caso | '')} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Caso">
           <option value="">Todos los casos</option>
           {Object.entries(CASO_TXT).map(([k, v]) => (
@@ -163,6 +180,7 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
         </select>
         <button
           onClick={() => setRiesgo((r) => !r)}
+          aria-pressed={riesgo}
           className={`rounded-full px-3 py-1.5 text-xs font-semibold ${riesgo ? 'bg-rojo text-white' : 'bg-card text-ink/70 ring-1 ring-line'}`}
         >
           Riesgo alto
@@ -175,6 +193,13 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
             </option>
           ))}
         </select>
+        {activos > 0 && (
+          <button onClick={limpiar} className="rounded-full px-3 py-1.5 text-xs font-semibold text-ink/70 underline underline-offset-2 hover:text-ink">
+            Quitar filtros
+          </button>
+        )}
+          </div>
+        </details>
         <select value={orden} onChange={(e) => setOrden(e.target.value as Orden)} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Ordenar">
           <option value="reciente">Movimiento más reciente</option>
           <option value="valor">Mayor valor</option>

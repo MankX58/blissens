@@ -140,7 +140,6 @@ export function Agenda(props: Props) {
   return (
     <div>
       <Encabezado
-        roles={['recepcion']}
         titulo="Agenda libre"
         descripcion="Los cupos que dejaron las cancelaciones. Elige uno, ofrécelo a los pacientes sugeridos, asígnalo cuando alguien acepte y confirma la cita un día antes."
       >
@@ -267,7 +266,7 @@ function Detalle({ h, e, ...p }: Props & { h: Hueco; e: EstadoEspacio }) {
           <div>
             <p className="text-sm text-white/55">{nombreDia(h.fecha, p.hoy)} · {fechaLarga(h.fecha)}</p>
             <p className="num mt-1 text-4xl font-bold tracking-tight">
-              {h.hora} <span className="text-white/40">–</span> {horaFin(h)}
+              {h.hora} <span className="text-white/60">–</span> {horaFin(h)}
             </p>
             <p className="mt-1 text-sm text-white/70">
               {h.especialista} · {h.minutos} min · Consultorio 1157
@@ -276,7 +275,7 @@ function Detalle({ h, e, ...p }: Props & { h: Hueco; e: EstadoEspacio }) {
           <div className="flex items-center gap-2">
             <span className="rounded-full bg-white/12 px-3 py-1 text-xs font-semibold">{INFO[e].t}</span>
             {!h.ocupadoPor && (
-              <button onClick={() => p.onBorrar(h.id)} aria-label="Eliminar cupo" title="Eliminar cupo" className="rounded-full p-2 text-white/45 hover:bg-white/10 hover:text-white">
+              <button onClick={() => p.onBorrar(h.id)} aria-label="Eliminar cupo" title="Eliminar cupo" className="rounded-full p-2 text-white/65 hover:bg-white/10 hover:text-white">
                 <Trash2 className="size-4" />
               </button>
             )}
@@ -287,7 +286,7 @@ function Detalle({ h, e, ...p }: Props & { h: Hueco; e: EstadoEspacio }) {
           {PASOS_FLUJO.map((t, i) => (
             <li key={t}>
               <span className={`block h-1 rounded-full ${i < paso ? 'bg-white' : i === paso ? 'iris' : 'bg-white/15'}`} />
-              <span className={`mt-2 block text-[11px] font-semibold ${i <= paso ? 'text-white' : 'text-white/40'}`}>
+              <span className={`mt-2 block text-[11px] font-semibold ${i <= paso ? 'text-white' : 'text-white/60'}`}>
                 {i + 1}. {t}
               </span>
             </li>
@@ -374,7 +373,7 @@ function PorLlenar({ h, ...p }: Props & { h: Hueco }) {
           </label>
           <div className="inline-flex rounded-full bg-soft p-1 text-xs font-semibold">
             {(['', 'Diagnóstico', 'Tratamiento'] as const).map((t) => (
-              <button key={t} onClick={() => setF({ ...f, tipo: t })} className={`rounded-full px-3 py-1.5 ${f.tipo === t ? 'bg-white shadow-sm' : 'text-ink/55'}`}>
+              <button key={t} onClick={() => setF({ ...f, tipo: t })} className={`rounded-full px-3 py-1.5 ${f.tipo === t ? 'bg-white shadow-sm' : 'text-ink/65'}`}>
                 {t || 'Todos'}
               </button>
             ))}

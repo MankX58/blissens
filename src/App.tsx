@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import { BarChart3, CalendarClock, FileSpreadsheet, Megaphone, Menu, Sparkles, Users } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { BarChart3, CalendarClock, FileSpreadsheet, Megaphone, Sparkles, UserCog, Users } from 'lucide-react';
 import type { Campana, ConfigWA, Datos, Hueco, Motivo, Paciente, Pantalla, Resultado } from './types';
 import { cargarDatosIniciales, datosDesdeCarga, datosVacios } from './data/inicial';
 import { hoyISO, nuevoCiclo, pasoActual, registrarContacto, tocaHoy } from './lib/reglas';
 import { apiConectada, enviarPorAPI, siguientePaso } from './lib/campanas';
-import { ROLES, type Rol } from './lib/roles';
+import { puedeVer, type Rol } from './lib/roles';
+import { authClient, esRol } from './lib/auth';
 import type { Carga } from './lib/excel';
 import { Contactar } from './components/Contactar';
 import { Sonrisa } from './components/ui';
+import { Ajustes, Navegacion, type Item } from './components/Navegacion';
+import { Login } from './screens/Login';
+import { Cuentas } from './screens/Cuentas';
 import { Hoy } from './screens/Hoy';
 import { Cargar } from './screens/Cargar';
 import { Agenda } from './screens/Agenda';
@@ -27,8 +31,43 @@ function cargarGuardado(): Datos | null {
   return null;
 }
 
-// Primera vez: lee los 4 Excel reales de la clínica desde /public/datos
+export interface Usuario {
+  id: string;
+  nombre: string;
+  email: string;
+  rol: Rol;
+}
+
+const Pantallazo = ({ children }: { children: ReactNode }) => (
+  <div className="grid min-h-screen place-items-center bg-ink px-6 text-center text-white">
+    <div>
+      <Sonrisa size={44} className="mx-auto" />
+      <p className="wordmark mt-5 text-sm">BLISSENS</p>
+      {children}
+    </div>
+  </div>
+);
+
+// Sin sesión: login. Con sesión: el panel con lo que le toca a su rol.
 export default function App() {
+  const { data: sesion, isPending } = authClient.useSession();
+  if (isPending) return <Pantallazo><p className="mt-4 text-sm text-white/60">Verificando tu sesión…</p></Pantallazo>;
+  if (!sesion) return <Login />;
+  const { id, name, email, role } = sesion.user;
+  if (!esRol(role))
+    return (
+      <Pantallazo>
+        <p className="mt-4 max-w-sm text-sm text-white/70">Tu cuenta ({email}) no tiene un rol del panel. Pídele a dirección que te asigne uno.</p>
+        <button onClick={() => authClient.signOut()} className="mt-4 rounded-full bg-white px-5 py-2 text-sm font-semibold text-ink">
+          Cerrar sesión
+        </button>
+      </Pantallazo>
+    );
+  return <ConDatos usuario={{ id, nombre: name, email, rol: role }} />;
+}
+
+// Primera vez: lee los 4 Excel reales de la clínica desde /public/datos
+function ConDatos({ usuario }: { usuario: Usuario }) {
   const [inicial, setInicial] = useState<Datos | null>(cargarGuardado);
   const [error, setError] = useState('');
   const cargar = () => {
@@ -40,12 +79,9 @@ export default function App() {
   useEffect(() => {
     if (!inicial) cargar();
   }, []);
-  if (inicial) return <Panel inicial={inicial} />;
+  if (inicial) return <Panel inicial={inicial} usuario={usuario} />;
   return (
-    <div className="grid min-h-screen place-items-center bg-ink px-6 text-center text-white">
-      <div>
-        <Sonrisa size={44} className="mx-auto" />
-        <p className="wordmark mt-5 text-sm">BLISSENS</p>
+    <Pantallazo>
         {error ? (
           <>
             <p className="mt-4 text-sm text-white/70">No se pudieron leer los archivos de la clínica: {error}</p>
@@ -61,8 +97,7 @@ export default function App() {
         ) : (
           <p className="mt-4 text-sm text-white/60">Leyendo la agenda, el arancel y los guiones…</p>
         )}
-      </div>
-    </div>
+    </Pantallazo>
   );
 }
 
@@ -72,15 +107,19 @@ interface Aviso {
   deshacer?: () => void;
 }
 
-function Panel({ inicial }: { inicial: Datos }) {
+// primera pantalla del menú que puede ver cada rol
+const INICIO: Record<Rol, Pantalla> = { auxiliar: 'hoy', recepcion: 'agenda', mercadeo: 'campanas', direccion: 'hoy' };
+
+function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
   const [datos, setDatos] = useState(inicial);
   const { pacientes, huecos, campanas, config } = datos;
   const hoy = datos.fechaCorte; // fecha de trabajo (por defecto, el cierre de la agenda cargada)
-  const [pantalla, setPantalla] = useState<Pantalla>('hoy');
+  const inicio = INICIO[usuario.rol];
+  const [pantalla, setPantalla] = useState<Pantalla>(inicio);
   const [expediente, setExpediente] = useState<string | null>(null);
   const [contactando, setContactando] = useState<Paciente | null>(null);
   const [aviso, setAviso] = useState<Aviso | null>(null);
-  const [menu, setMenu] = useState(false);
+  const [ajustes, setAjustes] = useState(false);
 
   useEffect(() => {
     try {
@@ -98,7 +137,6 @@ function Panel({ inicial }: { inicial: Datos }) {
 
   useEffect(() => {
     window.scrollTo({ top: 0 });
-    setMenu(false);
   }, [pantalla, expediente]);
 
   // ---------- acciones ----------
@@ -275,7 +313,7 @@ function Panel({ inicial }: { inicial: Datos }) {
     cargarDatosIniciales()
       .then((d) => {
         setDatos(d);
-        setPantalla('hoy');
+        setPantalla(inicio);
       })
       .catch((e: Error) => setAviso({ texto: e.message }));
   };
@@ -285,123 +323,62 @@ function Panel({ inicial }: { inicial: Datos }) {
     setPantalla('pacientes');
   };
 
-  // ---------- navegación agrupada por rol ----------
+  // ---------- navegación: solo las secciones del rol ----------
   const enviando = campanas.find((c) => c.estado === 'enviando');
-  const grupos: { rol: Rol; items: { id: Pantalla; t: string; icono: typeof Users; n?: number }[] }[] = [
-    {
-      rol: 'auxiliar',
-      items: [
-        { id: 'hoy', t: 'Hoy toca contactar', icono: Sparkles, n: pacientes.filter((p) => tocaHoy(p, hoy)).length },
-        { id: 'pacientes', t: 'Pacientes', icono: Users },
-        { id: 'cargar', t: 'Cargar agenda', icono: FileSpreadsheet },
-      ],
-    },
-    { rol: 'recepcion', items: [{ id: 'agenda', t: 'Agenda libre', icono: CalendarClock, n: huecos.filter((h) => h.fecha >= hoy && !h.ocupadoPor).length }] },
-    { rol: 'mercadeo', items: [{ id: 'campanas', t: 'Campañas', icono: Megaphone }] },
-    { rol: 'direccion', items: [{ id: 'indicadores', t: 'Indicadores', icono: BarChart3 }] },
-  ];
+  const items = (
+    [
+      { id: 'hoy', t: 'Hoy toca contactar', corto: 'Hoy', icono: Sparkles, rol: 'auxiliar', n: pacientes.filter((p) => tocaHoy(p, hoy)).length, nTxt: 'por contactar' },
+      { id: 'pacientes', t: 'Pacientes', corto: 'Pacientes', icono: Users, rol: 'auxiliar' },
+      { id: 'cargar', t: 'Cargar agenda', corto: 'Cargar', icono: FileSpreadsheet, rol: 'auxiliar' },
+      { id: 'agenda', t: 'Agenda libre', corto: 'Agenda', icono: CalendarClock, rol: 'recepcion', n: huecos.filter((h) => h.fecha >= hoy && !h.ocupadoPor).length, nTxt: 'cupos libres' },
+      { id: 'campanas', t: 'Campañas', corto: 'Campañas', icono: Megaphone, rol: 'mercadeo' },
+      { id: 'indicadores', t: 'Indicadores', corto: 'Indicadores', icono: BarChart3, rol: 'direccion' },
+      { id: 'cuentas', t: 'Cuentas', corto: 'Cuentas', icono: UserCog, rol: 'direccion' },
+    ] as Item[]
+  ).filter((x) => puedeVer(usuario.rol, x.id));
+  const ir = (p: Pantalla) => {
+    setPantalla(p);
+    if (p === 'pacientes') setExpediente(null);
+  };
 
-  const barra = (
-    <div className="flex h-full flex-col bg-ink text-white">
-      <button onClick={() => setPantalla('hoy')} className="flex items-center gap-3 px-6 pb-6 pt-7" aria-label="Inicio">
-        <Sonrisa />
-        <span className="text-left leading-none">
-          <span className="wordmark block text-[15px]">BLISSENS</span>
-          <span className="mt-1 block text-[11px] text-white/45">Recuperación de pacientes</span>
-        </span>
-      </button>
-      <nav className="flex-1 space-y-6 overflow-y-auto px-3 pb-6" aria-label="Secciones">
-        {grupos.map((g) => (
-          <div key={g.rol}>
-            <p className="flex items-center gap-2 px-3 pb-2 text-[10.5px] font-semibold uppercase tracking-[.16em] text-white/40">
-              <span className="size-1.5 rounded-full" style={{ background: ROLES[g.rol].color }} />
-              {ROLES[g.rol].nombre}
-            </p>
-            {g.items.map((x) => {
-              const activo = pantalla === x.id;
-              return (
-                <button
-                  key={x.id}
-                  onClick={() => {
-                    setPantalla(x.id);
-                    if (x.id === 'pacientes') setExpediente(null);
-                  }}
-                  aria-current={activo ? 'page' : undefined}
-                  className={`group relative flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-[13.5px] font-medium ${
-                    activo ? 'bg-white text-ink' : 'text-white/65 hover:bg-white/6 hover:text-white'
-                  }`}
-                >
-                  <x.icono className={`size-[18px] ${activo ? '' : 'text-white/45 group-hover:text-white/80'}`} />
-                  <span className="flex-1 text-left">{x.t}</span>
-                  {!!x.n && <span className={`num rounded-full px-2 py-px text-[11px] font-bold ${activo ? 'iris' : 'bg-white/12'}`}>{x.n}</span>}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </nav>
-      <div className="space-y-3 border-t border-white/10 px-6 py-5 text-xs">
-        {enviando && (
-          <button onClick={() => setPantalla('campanas')} className="flex w-full items-center gap-2 text-left text-white/80">
-            <span className="latido size-2 shrink-0 rounded-full bg-lilac" />
-            <span className="truncate">
-              Enviando “{enviando.nombre}” · {enviando.envios.filter((e) => e.estado !== 'pendiente').length}/{enviando.envios.length}
-            </span>
-          </button>
-        )}
-        <p className="flex items-center gap-2 text-white/50">
-          <span className={`size-2 rounded-full ${apiConectada(config) ? 'bg-mint' : 'bg-white/30'}`} />
-          WhatsApp: {apiConectada(config) ? 'API conectada' : 'modo simulación'}
-        </p>
-        <label className="block text-white/50">
-          Fecha de trabajo
-          <span className="mt-1 flex items-center gap-2">
-            <input
-              type="date"
-              value={hoy}
-              onChange={(e) => e.target.value && setDatos((d) => ({ ...d, fechaCorte: e.target.value }))}
-              className="w-full rounded-lg bg-white/10 px-2 py-1 text-white [color-scheme:dark]"
-            />
-            <button onClick={() => setDatos((d) => ({ ...d, fechaCorte: hoyISO() }))} className="shrink-0 text-white/40 hover:text-white" title="Usar la fecha de hoy">
-              Hoy
-            </button>
-          </span>
-        </label>
-        <label className="block text-white/50">
-          Asesora que firma los guiones
-          <input value={datos.asesora} onChange={(e) => setDatos((d) => ({ ...d, asesora: e.target.value }))} className="mt-1 w-full rounded-lg bg-white/10 px-2 py-1 text-white" />
-        </label>
-        <p className="text-white/35">El Tesoro · Torre Médica 2 · Cons. 1157</p>
-        <button onClick={restaurar} className="text-white/35 underline-offset-2 hover:text-white/70 hover:underline">
-          Volver a leer los Excel de la clínica
-        </button>
-      </div>
-    </div>
-  );
+  // al cambiar de sección: título de la pestaña y foco al contenido (lectores de pantalla y teclado)
+  const principal = useRef<HTMLElement>(null);
+  const primera = useRef(true);
+  useEffect(() => {
+    document.title = `${items.find((x) => x.id === pantalla)?.t ?? 'Panel'} · Blissens`;
+    if (primera.current) primera.current = false;
+    else principal.current?.focus({ preventScroll: true });
+  }, [pantalla, expediente]);
 
   return (
     <div className="min-h-screen">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[264px] lg:block">{barra}</aside>
+      <a href="#contenido" className="sr-only z-[60] rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white focus:not-sr-only focus:fixed focus:left-4 focus:top-4">
+        Saltar al contenido
+      </a>
+      <Navegacion
+        items={items}
+        pantalla={pantalla}
+        onIr={ir}
+        usuario={usuario}
+        hoy={hoy}
+        enviando={enviando && { nombre: enviando.nombre, hechos: enviando.envios.filter((e) => e.estado !== 'pendiente').length, total: enviando.envios.length }}
+        onAjustes={() => setAjustes(true)}
+      />
+      <Ajustes
+        abierto={ajustes}
+        onCerrar={() => setAjustes(false)}
+        hoy={hoy}
+        hoyReal={hoyISO()}
+        asesora={datos.asesora}
+        usuario={usuario}
+        whatsapp={apiConectada(config)}
+        onFecha={(f) => setDatos((d) => ({ ...d, fechaCorte: f }))}
+        onAsesora={(a) => setDatos((d) => ({ ...d, asesora: a }))}
+        onRestaurar={restaurar}
+      />
 
-      {/* barra superior en móvil */}
-      <div className="sticky top-0 z-30 flex items-center justify-between bg-ink px-4 py-3 text-white lg:hidden">
-        <button onClick={() => setPantalla('hoy')} className="flex items-center gap-2.5">
-          <Sonrisa size={24} />
-          <span className="wordmark text-[13px]">BLISSENS</span>
-        </button>
-        <button onClick={() => setMenu(true)} aria-label="Abrir menú" className="grid size-9 place-items-center rounded-full bg-white/10">
-          <Menu className="size-5" />
-        </button>
-      </div>
-      {menu && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="fondo absolute inset-0 bg-ink/50" onClick={() => setMenu(false)} />
-          <div className="cajon absolute inset-y-0 left-0 w-[280px] max-w-[85vw]">{barra}</div>
-        </div>
-      )}
-
-      <main className="lg:pl-[264px]">
-        <div key={pantalla + (expediente ?? '')} className="mx-auto max-w-6xl px-4 py-8 sm:px-8 lg:px-12 lg:py-12">
+      <main id="contenido" ref={principal} tabIndex={-1} aria-label={items.find((x) => x.id === pantalla)?.t} className="pb-24 outline-none lg:pb-0 lg:pl-[264px]">
+        <div key={pantalla + (expediente ?? '')} className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-8 lg:px-12 lg:py-12">
           {pantalla === 'hoy' && (
             <Hoy pacientes={pacientes} hoy={hoy} onContactar={setContactando} onIrCargar={() => setPantalla('cargar')} onAbrir={abrirExpediente} />
           )}
@@ -467,6 +444,7 @@ function Panel({ inicial }: { inicial: Datos }) {
             />
           )}
           {pantalla === 'indicadores' && <Indicadores datos={datos} hoy={hoy} />}
+          {pantalla === 'cuentas' && puedeVer(usuario.rol, 'cuentas') && <Cuentas yo={usuario.id} onAviso={(texto) => setAviso({ texto })} />}
         </div>
       </main>
 
@@ -480,12 +458,13 @@ function Panel({ inicial }: { inicial: Datos }) {
         onReasignar={reasignar}
       />
 
+      {/* región viva siempre montada: los lectores de pantalla anuncian cada aviso */}
+      <div role="status" aria-live="polite">
       {aviso && (
         <div
-          role="status"
-          className="hoja fixed bottom-5 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-full bg-ink py-2.5 pl-4 pr-2.5 text-sm text-white shadow-2xl lg:left-[calc(50%+132px)]"
+          className="hoja fixed bottom-24 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-full bg-ink py-2.5 pl-4 pr-2.5 text-sm text-white shadow-2xl lg:bottom-5 lg:left-[calc(50%+132px)]"
         >
-          <span className={`size-2.5 shrink-0 rounded-full ${aviso.exito ? 'iris latido' : 'bg-white/40'}`} />
+          <span className={`size-2.5 shrink-0 rounded-full ${aviso.exito ? 'iris latido' : 'bg-white/40'}`} aria-hidden />
           <span className="truncate">{aviso.texto}</span>
           {aviso.deshacer && (
             <button
@@ -500,6 +479,7 @@ function Panel({ inicial }: { inicial: Datos }) {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }
