@@ -51,6 +51,9 @@ env/
 
 # Bases de datos y datos locales
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 *.sqlite
 *.sqlite3
 datos/

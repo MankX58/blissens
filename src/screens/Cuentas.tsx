@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { UserPlus } from 'lucide-react';
+import { Check, Eye, EyeOff, UserPlus } from 'lucide-react';
+import type { Profesional } from '../types';
 import { authClient, esRol } from '../lib/auth';
+import { ESPECIALISTAS } from '../lib/reglas';
 import { ROLES, type Rol } from '../lib/roles';
 import { Encabezado, Iniciales, Modal, btnChico, btnNegro } from '../components/ui';
 
@@ -10,9 +12,24 @@ interface Cuenta {
   email: string;
   role?: string | null;
   banned?: boolean | null;
+  profesional?: string | null;
 }
 
 const OPCIONES = Object.entries(ROLES) as [Rol, { nombre: string }][];
+
+// el especialista ve solo la agenda que se le asigne aquí
+function SelectAgenda({ valor, onCambio, etiqueta, className = '' }: { valor: string; onCambio: (p: Profesional) => void; etiqueta: string; className?: string }) {
+  return (
+    <select aria-label={etiqueta} value={valor} onChange={(e) => onCambio(e.target.value as Profesional)} className={`field ${className}`} required>
+      <option value="" disabled>
+        Elige su agenda…
+      </option>
+      {ESPECIALISTAS.map((e) => (
+        <option key={e}>{e}</option>
+      ))}
+    </select>
+  );
+}
 
 export function Cuentas({ yo, onAviso }: { yo: string; onAviso: (t: string) => void }) {
   const [cuentas, setCuentas] = useState<Cuenta[] | null>(null);
@@ -61,7 +78,15 @@ export function Cuentas({ yo, onAviso }: { yo: string; onAviso: (t: string) => v
                     <p className="truncate text-sm text-muted">{c.email}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {c.role === 'especialista' && (
+                    <SelectAgenda
+                      etiqueta={`Agenda de ${c.name}`}
+                      valor={c.profesional ?? ''}
+                      onCambio={(p) => cambiar(authClient.admin.updateUser({ userId: c.id, data: { profesional: p } }), `${c.name} ve ahora la agenda de ${p}`)}
+                      className={`w-auto py-1.5 ${c.profesional ? '' : 'border-amarillo'}`}
+                    />
+                  )}
                   <select
                     aria-label={`Rol de ${c.name}`}
                     value={esRol(c.role) ? c.role : ''}
@@ -95,6 +120,48 @@ export function Cuentas({ yo, onAviso }: { yo: string; onAviso: (t: string) => v
         </ul>
       )}
 
+      <section aria-labelledby="t-roles">
+        <h2 id="t-roles" className="text-lg font-semibold">
+          Qué hace y qué ve cada rol
+        </h2>
+        <p className="text-sm text-muted">Cada persona entra a un inicio con sus responsabilidades. Lo que no es de su rol no aparece.</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {OPCIONES.map(([r]) => {
+            const d = ROLES[r];
+            return (
+              <article key={r} className="card rounded-[22px] p-5">
+                <h3 className="flex items-center gap-2 font-semibold">
+                  <span className="size-2.5 rounded-full" style={{ background: d.color }} aria-hidden />
+                  {d.nombre}
+                </h3>
+                <p className="mt-0.5 text-xs text-muted">{d.quien}</p>
+                <p className="mt-2 text-sm text-ink/75">{d.proposito}</p>
+                <ul className="mt-3 space-y-1 text-sm">
+                  {d.ve.map((x) => (
+                    <li key={x} className="flex gap-2">
+                      <Eye className="mt-0.5 size-4 shrink-0 text-verde" aria-hidden />
+                      <span>
+                        <span className="sr-only">Ve: </span>
+                        {x}
+                      </span>
+                    </li>
+                  ))}
+                  {d.noVe.map((x) => (
+                    <li key={x} className="flex gap-2 text-ink/60">
+                      <EyeOff className="mt-0.5 size-4 shrink-0" aria-hidden />
+                      <span>
+                        <span className="sr-only">No ve: </span>
+                        {x}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
       <Modal abierto={nueva} onCerrar={() => setNueva(false)} titulo="Nueva cuenta" ancho="max-w-md">
         <NuevaCuenta
           onCreada={(nombre) => {
@@ -109,7 +176,7 @@ export function Cuentas({ yo, onAviso }: { yo: string; onAviso: (t: string) => v
 }
 
 function NuevaCuenta({ onCreada }: { onCreada: (nombre: string) => void }) {
-  const [f, setF] = useState({ name: '', email: '', role: 'auxiliar' as Rol, password: '' });
+  const [f, setF] = useState({ name: '', email: '', role: 'auxiliar' as Rol, password: '', profesional: '' });
   const [error, setError] = useState('');
   const [enviando, setEnviando] = useState(false);
   const campo = (k: keyof typeof f) => ({ value: f[k], onChange: (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value }) });
@@ -123,7 +190,7 @@ function NuevaCuenta({ onCreada }: { onCreada: (nombre: string) => void }) {
       email: f.email.trim().toLowerCase(),
       role: f.role,
       password: f.password || undefined, // sin contraseña: solo entra con Google
-      data: { emailVerified: true },
+      data: f.role === 'especialista' ? { emailVerified: true, profesional: f.profesional } : { emailVerified: true },
     });
     setEnviando(false);
     if (error) setError(error.message?.includes('already exists') ? 'Ya existe una cuenta con ese correo.' : error.message || 'No se pudo crear la cuenta.');
@@ -150,7 +217,22 @@ function NuevaCuenta({ onCreada }: { onCreada: (nombre: string) => void }) {
             </option>
           ))}
         </select>
+        <span className="mt-2 block rounded-2xl bg-soft p-3 text-xs font-normal leading-relaxed text-ink/75">
+          <b className="font-semibold">{ROLES[f.role].proposito}</b>
+          {ROLES[f.role].hace.map((x) => (
+            <span key={x} className="mt-1 flex gap-1.5">
+              <Check className="mt-0.5 size-3.5 shrink-0" aria-hidden /> {x}
+            </span>
+          ))}
+        </span>
       </label>
+      {f.role === 'especialista' && (
+        <label className="block text-sm font-medium">
+          Agenda del especialista
+          <SelectAgenda etiqueta="Agenda del especialista" valor={f.profesional} onCambio={(p) => setF({ ...f, profesional: p })} className="mt-1" />
+          <span className="mt-1 block text-xs font-normal text-muted">Verá solo los pacientes y cupos de esta agenda.</span>
+        </label>
+      )}
       <label className="block text-sm font-medium">
         Contraseña <span className="font-normal text-muted">(opcional)</span>
         <input type="password" minLength={8} autoComplete="new-password" {...campo('password')} className="field mt-1" />

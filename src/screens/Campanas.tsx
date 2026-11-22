@@ -1,8 +1,9 @@
-import { useMemo, useState, type ReactNode } from 'react';
-import { ChevronDown, Download, MessageCircle, Pause, Play, Plug, RotateCcw, Send, Trash2, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ArrowRight, Check, ChevronDown, Download, MessageCircle, Pause, Play, Plus, RotateCcw, Send, Trash2, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import type { Campana, ConfigWA, EstadoEnvio, Paciente } from '../types';
-import { AUDIENCIAS, ESTADO_CAMPANA_TXT, apiConectada, personalizar } from '../lib/campanas';
+import type { Campana, EstadoEnvio, Paciente } from '../types';
+import { AUDIENCIAS, ESTADO_CAMPANA_TXT, personalizar } from '../lib/campanas';
+import type { AccionCampana, NuevaCampana } from '../lib/api';
 import { linkWhatsApp } from '../lib/reglas';
 import { Encabezado, Etiqueta, Modal, Vacio, btnBorde, btnChico, btnIris, btnNegro } from '../components/ui';
 
@@ -31,40 +32,161 @@ const ahoraLocal = () => {
 export function Campanas({
   pacientes,
   campanas,
-  config,
+  whatsapp,
   onCrear,
-  onActualizar,
+  onAccion,
+  onRespuesta,
   onBorrar,
-  onConfig,
   onAbrir,
 }: {
   pacientes: Paciente[];
   campanas: Campana[];
-  config: ConfigWA;
-  onCrear: (c: Campana) => void;
-  onActualizar: (id: string, fn: (c: Campana) => Campana) => void;
+  whatsapp: { conectado: boolean; modo: string };
+  onCrear: (c: NuevaCampana) => Promise<boolean>;
+  onAccion: (id: string, accion: AccionCampana) => void;
+  onRespuesta: (id: string, envio: string, respondio: boolean) => void;
   onBorrar: (id: string) => void;
-  onConfig: (c: ConfigWA) => void;
-  onAbrir: (id: string) => void;
+  onAbrir?: (id: string) => void; // campañas no abre expedientes clínicos
 }) {
-  const conectada = apiConectada(config);
+  const conectada = whatsapp.conectado;
   const [verConfig, setVerConfig] = useState(false);
-  const [audId, setAudId] = useState(AUDIENCIAS[0].id);
-  const aud = AUDIENCIAS.find((a) => a.id === audId)!;
+  const [nueva, setNueva] = useState<string | null>(null); // id de la audiencia con la que abre el asistente
+
+  // quién puede recibir: en seguimiento o sin respuesta al 3-7-15, y con celular
+  const posibles = (filtro: (p: Paciente) => boolean) =>
+    pacientes.filter((p) => (p.estado === 'pendiente' || p.estado === 'agotado') && p.telefono && filtro(p));
+  const audiencias = useMemo(() => AUDIENCIAS.map((a) => ({ ...a, n: posibles(a.filtro).length })), [pacientes]);
+  const sugeridas = [...audiencias].filter((a) => a.n > 0).sort((a, b) => Number(b.id === 'agotado') - Number(a.id === 'agotado') || b.n - a.n).slice(0, 3);
+
+  const envios = campanas.flatMap((c) => c.envios);
+  const enviados = envios.filter((e) => e.estado === 'enviado' || e.estado === 'respondio').length;
+  const respondieron = envios.filter((e) => e.estado === 'respondio').length;
+  const enCurso = campanas.filter((c) => c.estado === 'enviando' || c.estado === 'programada' || c.estado === 'pausada').length;
+
+  return (
+    <div className="space-y-8">
+      <Encabezado titulo="Campañas" descripcion="Mensajes de WhatsApp a un grupo de pacientes, uno tras otro y personalizados, para recuperar a quien el seguimiento diario no alcanzó.">
+        <button onClick={() => setVerConfig(true)} className={`${btnBorde} gap-2`}>
+          <span className={`size-2 rounded-full ${conectada ? 'bg-verde' : 'bg-amarillo'}`} aria-hidden />
+          {conectada ? 'WhatsApp conectado' : 'Modo simulación'}
+        </button>
+        <button onClick={() => setNueva(sugeridas[0]?.id ?? AUDIENCIAS[0].id)} className={btnNegro}>
+          <Plus className="size-4" aria-hidden /> Nueva campaña
+        </button>
+      </Encabezado>
+
+      {/* resumen */}
+      <dl className="entrar card grid grid-cols-3 gap-px overflow-hidden bg-line p-0">
+        {[
+          ['En curso', String(enCurso), enCurso === 1 ? 'campaña' : 'campañas'],
+          ['Mensajes enviados', String(enviados), `en ${campanas.length} ${campanas.length === 1 ? 'campaña' : 'campañas'}`],
+          ['Respondieron', enviados ? `${Math.round((respondieron / enviados) * 100)} %` : '—', `${respondieron} pacientes`],
+        ].map(([k, v, sub]) => (
+          <div key={k} className="bg-white p-4 sm:p-5">
+            <dt className="text-xs text-muted">{k}</dt>
+            <dd className="mt-1 text-2xl font-bold tracking-tight">{v}</dd>
+            <dd className="text-xs text-muted">{sub}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {/* atajos: a quién conviene escribirle */}
+      {sugeridas.length > 0 && (
+        <section aria-labelledby="t-sugeridas">
+          <h2 id="t-sugeridas" className="kicker mb-3">
+            Para empezar
+          </h2>
+          <ul className="grid gap-3 sm:grid-cols-3">
+            {sugeridas.map((a) => (
+              <li key={a.id}>
+                <button onClick={() => setNueva(a.id)} className="card lift group flex h-full w-full flex-col rounded-[22px] p-5 text-left">
+                  <span className="flex items-baseline gap-2">
+                    <span className="text-3xl font-bold tracking-tight">{a.n}</span>
+                    <span className="text-sm text-muted">con celular</span>
+                  </span>
+                  <span className="mt-2 font-semibold">{a.titulo}</span>
+                  <span className="mt-0.5 text-sm text-muted">{a.descripcion}</span>
+                  <span className="mt-auto flex items-center gap-1.5 pt-4 text-sm font-semibold">
+                    Crear campaña <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" aria-hidden />
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* campañas */}
+      <section aria-labelledby="t-campanas">
+        <h2 id="t-campanas" className="kicker mb-3">
+          Tus campañas
+        </h2>
+        {campanas.length === 0 ? (
+          <Vacio titulo="Aún no hay campañas" texto="Elige un grupo arriba o crea una nueva. Aquí verás cómo avanza cada envío y quién responde.">
+            <button onClick={() => setNueva(sugeridas[0]?.id ?? AUDIENCIAS[0].id)} className={btnNegro}>
+              <Plus className="size-4" aria-hidden /> Nueva campaña
+            </button>
+          </Vacio>
+        ) : (
+          <div className="escalonado space-y-3">
+            {campanas.map((c) => (
+              <TarjetaCampana key={c.id} c={c} onAccion={onAccion} onRespuesta={onRespuesta} onBorrar={onBorrar} onAbrir={onAbrir} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {nueva && (
+        <Asistente
+          inicial={nueva}
+          audiencias={audiencias}
+          posibles={posibles}
+          conectada={conectada}
+          onCerrar={() => setNueva(null)}
+          onCrear={async (c) => {
+            const ok = await onCrear(c);
+            if (ok) setNueva(null);
+            return ok;
+          }}
+        />
+      )}
+      <ComoConectar abierto={verConfig} conectado={conectada} onCerrar={() => setVerConfig(false)} />
+    </div>
+  );
+}
+
+// ---------- asistente de 3 pasos: a quién, qué decir, cuándo ----------
+const PASOS_ASISTENTE = ['A quién', 'Mensaje', 'Revisar y enviar'] as const;
+
+function Asistente({
+  inicial,
+  audiencias,
+  posibles,
+  conectada,
+  onCerrar,
+  onCrear,
+}: {
+  inicial: string;
+  audiencias: ((typeof AUDIENCIAS)[number] & { n: number })[];
+  posibles: (filtro: (p: Paciente) => boolean) => Paciente[];
+  conectada: boolean;
+  onCerrar: () => void;
+  onCrear: (c: NuevaCampana) => Promise<boolean>;
+}) {
   const mes = new Date().toLocaleDateString('es-CO', { month: 'long' });
+  const [paso, setPaso] = useState(0);
+  const [audId, setAudId] = useState(inicial);
+  const aud = AUDIENCIAS.find((a) => a.id === audId)!;
   const [nombre, setNombre] = useState(`${aud.titulo} · ${mes}`);
   const [plantilla, setPlantilla] = useState(aud.plantilla);
   const [cuando, setCuando] = useState<'ahora' | 'programar'>('ahora');
   const [fecha, setFecha] = useState(ahoraLocal);
   const [ritmo, setRitmo] = useState(15);
   const [quitados, setQuitados] = useState<Set<string>>(new Set());
-  const [verLista, setVerLista] = useState(false);
+  const [lanzando, setLanzando] = useState(false);
 
-  const posibles = (filtro: (p: Paciente) => boolean) =>
-    pacientes.filter((p) => (p.estado === 'pendiente' || p.estado === 'agotado') && p.telefono && filtro(p));
-  const lista = useMemo(() => posibles(aud.filtro), [pacientes, aud]);
+  const lista = useMemo(() => posibles(aud.filtro), [aud]);
   const elegidos = lista.filter((p) => !quitados.has(p.id));
-
   const elegirAudiencia = (id: string) => {
     const a = AUDIENCIAS.find((x) => x.id === id)!;
     setAudId(id);
@@ -72,217 +194,237 @@ export function Campanas({
     setPlantilla(a.plantilla);
     setQuitados(new Set());
   };
+  const insertar = (v: string) => setPlantilla((t) => `${t}${t.endsWith(' ') ? '' : ' '}${v}`);
+  const puedeSeguir = paso === 0 ? lista.length > 0 : paso === 1 ? !!plantilla.trim() : elegidos.length > 0 && !lanzando;
 
-  const lanzar = () => {
-    const inicio = cuando === 'ahora' ? new Date().toISOString() : new Date(fecha).toISOString();
-    onCrear({
-      id: `c-${Date.now()}`,
+  const lanzar = async () => {
+    setLanzando(true);
+    await onCrear({
       nombre: nombre.trim() || aud.titulo,
       audiencia: aud.titulo,
       plantilla,
-      creadaEl: new Date().toISOString(),
-      inicio,
+      inicio: cuando === 'ahora' ? new Date().toISOString() : new Date(fecha).toISOString(),
       ritmoSeg: ritmo,
-      canal: conectada ? 'api' : 'simulado',
-      estado: 'programada',
-      envios: elegidos.map((p) => ({ pacienteId: p.id, nombre: p.nombre, telefono: p.telefono, texto: personalizar(plantilla, p), estado: 'pendiente' })),
+      envios: elegidos.map((p) => ({ pacienteId: p.id, texto: personalizar(plantilla, p) })),
     });
-    setQuitados(new Set());
+    setLanzando(false);
   };
 
-  const insertar = (v: string) => setPlantilla((t) => `${t}${t.endsWith(' ') ? '' : ' '}${v}`);
-
   return (
-    <div>
-      <Encabezado
-        titulo="Campañas automáticas"
-        descripcion="Elige un grupo de pacientes, escribe un mensaje y el panel lo envía a todos por WhatsApp, uno tras otro, sin que tengas que hacerlo a mano."
-      >
-        <button onClick={() => setVerConfig(true)} className={btnBorde}>
-          <Plug className="size-4" /> {conectada ? 'WhatsApp conectado' : 'Conectar WhatsApp'}
-        </button>
-      </Encabezado>
+    <Modal abierto onCerrar={onCerrar} titulo="Nueva campaña" ancho="max-w-4xl">
+      <header className="border-b border-line p-5 pr-16 sm:px-8 sm:py-6">
+        <h2 className="text-xl font-bold tracking-tight">Nueva campaña</h2>
+        <ol className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" aria-label="Pasos">
+          {PASOS_ASISTENTE.map((t, i) => (
+            <li key={t} className="flex items-center gap-2" aria-current={i === paso ? 'step' : undefined}>
+              <button
+                onClick={() => i < paso && setPaso(i)}
+                disabled={i > paso}
+                className={`flex items-center gap-2 rounded-full py-1 pl-1 pr-3 font-semibold ${i === paso ? 'bg-ink text-white' : i < paso ? 'text-ink hover:bg-soft' : 'text-muted'}`}
+              >
+                <span className={`grid size-6 place-items-center rounded-full text-xs ${i === paso ? 'bg-white text-ink' : i < paso ? 'bg-verde text-white' : 'bg-soft'}`}>
+                  {i < paso ? <Check className="size-3.5" aria-hidden /> : i + 1}
+                </span>
+                {t}
+              </button>
+              {i < PASOS_ASISTENTE.length - 1 && <span className="h-px w-5 bg-line" aria-hidden />}
+            </li>
+          ))}
+        </ol>
+      </header>
 
-      {!conectada && (
-        <div className="entrar mt-6 flex flex-col gap-3 rounded-[22px] border border-lilac/60 bg-lilac/15 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
-          <p>
-            <b>Modo simulación.</b> Las campañas corren y quedan registradas, pero los mensajes no salen. Conecta WhatsApp Business API para enviarlos de verdad.
-          </p>
-          <button onClick={() => setVerConfig(true)} className={`${btnChico} shrink-0 bg-ink text-white`}>
-            Configurar
-          </button>
-        </div>
-      )}
+      <div className="p-5 sm:p-8">
+        {paso === 0 && (
+          <fieldset>
+            <legend className="mb-3 text-sm text-muted">Elige el grupo de pacientes. Solo cuentan los que tienen celular y siguen pendientes.</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {audiencias.map((a) => {
+                const activo = a.id === audId;
+                return (
+                  <label
+                    key={a.id}
+                    className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-4 ${a.n === 0 ? 'cursor-not-allowed opacity-50' : ''} ${
+                      activo ? 'border-ink bg-ink text-white' : 'border-line bg-white hover:border-ink/30'
+                    }`}
+                  >
+                    <input type="radio" name="audiencia" className="sr-only" checked={activo} disabled={a.n === 0} onChange={() => elegirAudiencia(a.id)} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-semibold">{a.titulo}</span>
+                      <span className={`block text-xs ${activo ? 'text-white/70' : 'text-muted'}`}>{a.descripcion}</span>
+                    </span>
+                    <span className={`num shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${activo ? 'iris text-ink' : 'bg-soft'}`}>{a.n}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        )}
 
-      {/* constructor */}
-      <section className="entrar card mt-6 overflow-hidden">
-        <div className="grid lg:grid-cols-[1.1fr_1fr]">
-          <div className="space-y-8 p-6 sm:p-8">
-            <Paso n={1} titulo="¿A quién le escribimos?">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {AUDIENCIAS.map((a) => {
-                  const n = posibles(a.filtro).length;
-                  const activo = a.id === audId;
-                  return (
-                    <button
-                      key={a.id}
-                      onClick={() => elegirAudiencia(a.id)}
-                      className={`rounded-2xl border p-3 text-left ${activo ? 'border-ink bg-ink text-white shadow-lg shadow-ink/10' : 'border-line bg-white hover:border-ink/30'}`}
-                    >
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold">{a.titulo}</span>
-                        <span className={`num rounded-full px-1.5 text-[11px] font-bold ${activo ? 'iris text-ink' : 'bg-soft'}`}>{n}</span>
-                      </span>
-                      <span className={`mt-1 block text-[11.5px] leading-snug ${activo ? 'text-white/60' : 'text-muted'}`}>{a.descripcion}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </Paso>
-
-            <Paso n={2} titulo="Mensaje">
-              <input value={nombre} onChange={(e) => setNombre(e.target.value)} className="field" aria-label="Nombre de la campaña" placeholder="Nombre de la campaña" />
-              <textarea value={plantilla} onChange={(e) => setPlantilla(e.target.value)} rows={5} className="field mt-2 leading-relaxed" aria-label="Mensaje" />
+        {paso === 1 && (
+          <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+            <div>
+              <label className="block text-sm font-medium">
+                Nombre de la campaña
+                <input value={nombre} onChange={(e) => setNombre(e.target.value)} className="field mt-1" />
+              </label>
+              <label className="mt-4 block text-sm font-medium">
+                Mensaje
+                <textarea value={plantilla} onChange={(e) => setPlantilla(e.target.value)} rows={7} className="field mt-1 leading-relaxed" />
+              </label>
               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-                Insertar:
-                {['{nombre}', '{tratamiento}', '{especialista}'].map((v) => (
-                  <button key={v} onClick={() => insertar(v)} className={`${btnChico} bg-soft font-mono text-ink/70 hover:text-ink`}>
-                    {v}
+                Insertar dato del paciente:
+                {[
+                  ['{nombre}', 'Nombre'],
+                  ['{tratamiento}', 'Tratamiento'],
+                  ['{especialista}', 'Especialista'],
+                ].map(([v, t]) => (
+                  <button key={v} onClick={() => insertar(v)} className={`${btnChico} bg-soft text-ink/75 hover:text-ink`}>
+                    + {t}
                   </button>
                 ))}
               </div>
-            </Paso>
+            </div>
+            <Vista texto={lista[0] ? personalizar(plantilla, lista[0]) : plantilla} quien={lista[0]?.nombre} />
+          </div>
+        )}
 
-            <Paso n={3} titulo="Envío">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex rounded-full bg-soft p-1">
-                  {(['ahora', 'programar'] as const).map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => setCuando(c)}
-                      className={`rounded-full px-4 py-1.5 text-[13px] font-semibold ${cuando === c ? 'bg-white shadow-sm' : 'text-ink/65'}`}
-                    >
-                      {c === 'ahora' ? 'Enviar ahora' : 'Programar'}
-                    </button>
-                  ))}
+        {paso === 2 && (
+          <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+            <div className="space-y-5">
+              <div>
+                <p className="text-sm font-medium">¿Cuándo?</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <div className="inline-flex rounded-full bg-soft p-1" role="radiogroup" aria-label="Cuándo enviar">
+                    {(['ahora', 'programar'] as const).map((c) => (
+                      <button
+                        key={c}
+                        role="radio"
+                        aria-checked={cuando === c}
+                        onClick={() => setCuando(c)}
+                        className={`rounded-full px-4 py-1.5 text-[13px] font-semibold ${cuando === c ? 'bg-white shadow-sm' : 'text-ink/65'}`}
+                      >
+                        {c === 'ahora' ? 'Ahora' : 'Programar'}
+                      </button>
+                    ))}
+                  </div>
+                  {cuando === 'programar' && <input type="datetime-local" value={fecha} onChange={(e) => setFecha(e.target.value)} className="field w-auto" aria-label="Fecha y hora" />}
                 </div>
-                {cuando === 'programar' && (
-                  <input type="datetime-local" value={fecha} onChange={(e) => setFecha(e.target.value)} className="field w-auto" aria-label="Fecha y hora" />
-                )}
-                <select value={ritmo} onChange={(e) => setRitmo(+e.target.value)} className="field w-auto" aria-label="Ritmo de envío">
+              </div>
+              <label className="block text-sm font-medium">
+                Ritmo de envío
+                <select value={ritmo} onChange={(e) => setRitmo(+e.target.value)} className="field mt-1 w-auto">
                   {RITMOS.map(([s, t]) => (
                     <option key={s} value={s}>
                       {t}
                     </option>
                   ))}
                 </select>
-              </div>
-              <p className="mt-2 text-xs text-muted">
-                Enviar con pausas evita que WhatsApp marque el número como spam. Tiempo estimado: {duracion(elegidos.length * ritmo)}. El envío avanza mientras el panel esté
-                abierto.
-              </p>
-            </Paso>
-          </div>
-
-          {/* vista previa + destinatarios */}
-          <div className="flex flex-col border-t border-line bg-soft/60 p-6 sm:p-8 lg:border-l lg:border-t-0">
-            <p className="kicker">Vista previa</p>
-            <div className="mt-3 rounded-[26px] bg-[#e9e2d6] p-4">
-              <div className="ml-auto max-w-[92%] rounded-2xl rounded-tr-md bg-[#d9fdd3] px-4 py-3 text-[13.5px] leading-relaxed shadow-sm">
-                {elegidos[0] ? personalizar(plantilla, elegidos[0]) : plantilla}
-                <span className="mt-1 block text-right text-[10px] text-ink/60">
-                  {new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })} ✓✓
-                </span>
-              </div>
+                <span className="mt-1 block text-xs font-normal text-muted">Enviar con pausas evita que WhatsApp marque el número como spam.</span>
+              </label>
+              <details className="group rounded-2xl border border-line">
+                <summary className="flex cursor-pointer list-none items-center justify-between p-4 text-sm [&::-webkit-details-marker]:hidden">
+                  <span>
+                    <b>{elegidos.length}</b> de {lista.length} destinatarios
+                  </span>
+                  <span className="flex items-center gap-1 text-xs font-semibold text-ink/70">
+                    Revisar <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden />
+                  </span>
+                </summary>
+                <ul className="max-h-60 divide-y divide-line overflow-y-auto border-t border-line px-4">
+                  {lista.map((p) => (
+                    <li key={p.id}>
+                      <label className="flex cursor-pointer items-center gap-3 py-2.5 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={!quitados.has(p.id)}
+                          onChange={() =>
+                            setQuitados((s) => {
+                              const n = new Set(s);
+                              if (n.has(p.id)) n.delete(p.id);
+                              else n.add(p.id);
+                              return n;
+                            })
+                          }
+                          className="size-4 accent-ink"
+                        />
+                        <span className="min-w-0 flex-1 truncate">{p.nombre}</span>
+                        <span className="text-xs text-muted">{p.telefono}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </details>
             </div>
-
-            <button onClick={() => setVerLista((v) => !v)} className="mt-6 flex items-center justify-between text-left">
-              <span>
-                <span className="kicker">Destinatarios</span>
-                <span className="block text-sm">
-                  <b>{elegidos.length}</b> de {lista.length} seleccionados
-                </span>
-              </span>
-              <ChevronDown className={`size-4 transition-transform ${verLista ? 'rotate-180' : ''}`} />
-            </button>
-            {verLista && (
-              <ul className="hoja mt-3 max-h-56 divide-y divide-line overflow-y-auto rounded-2xl bg-white px-3">
-                {lista.map((p) => (
-                  <li key={p.id}>
-                    <label className="flex cursor-pointer items-center gap-3 py-2.5 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={!quitados.has(p.id)}
-                        onChange={() =>
-                          setQuitados((s) => {
-                            const n = new Set(s);
-                            if (n.has(p.id)) n.delete(p.id);
-                            else n.add(p.id);
-                            return n;
-                          })
-                        }
-                        className="size-4 accent-ink"
-                      />
-                      <span className="min-w-0 flex-1 truncate">{p.nombre}</span>
-                      <span className="text-xs text-muted">{p.telefono}</span>
-                    </label>
-                  </li>
-                ))}
-                {lista.length === 0 && <li className="py-3 text-sm text-muted">Nadie en este grupo por ahora.</li>}
+            <div className="h-fit rounded-2xl bg-soft p-5 text-sm">
+              <p className="kicker">Resumen</p>
+              <p className="mt-2 font-semibold">{nombre || aud.titulo}</p>
+              <ul className="mt-3 space-y-2 text-ink/80">
+                <li>
+                  <b>{elegidos.length}</b> mensajes a «{aud.titulo}»
+                </li>
+                <li>
+                  1 cada {ritmo} s · ≈ {duracion(elegidos.length * ritmo)}
+                </li>
+                <li>{cuando === 'ahora' ? 'Empieza al lanzarla' : `Empieza el ${new Date(fecha).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}`}</li>
+                <li>{conectada ? 'Sale por WhatsApp Business' : 'Modo simulación: se registra pero no sale'}</li>
               </ul>
-            )}
-
-            <button disabled={!elegidos.length || !plantilla.trim()} onClick={lanzar} className={`${btnIris} mt-auto w-full py-3.5 text-[15px]`} style={{ marginTop: 24 }}>
-              <Send className="size-4" />
-              {cuando === 'ahora' ? `Lanzar campaña a ${elegidos.length}` : `Programar para ${elegidos.length}`}
-            </button>
+              <p className="mt-3 text-xs text-muted">El envío avanza mientras el panel esté abierto.</p>
+            </div>
           </div>
-        </div>
-      </section>
-
-      {/* campañas */}
-      <h2 className="mt-12 text-xl font-bold tracking-tight">Campañas</h2>
-      <div className="escalonado mt-4 space-y-3">
-        {campanas.length === 0 && <Vacio titulo="Aún no hay campañas" texto="Lanza la primera arriba; aquí verás su avance en vivo." />}
-        {campanas.map((c) => (
-          <TarjetaCampana key={c.id} c={c} onActualizar={onActualizar} onBorrar={onBorrar} onAbrir={onAbrir} />
-        ))}
+        )}
       </div>
 
-      <ConfigModal key={String(verConfig)} abierto={verConfig} config={config} onCerrar={() => setVerConfig(false)} onGuardar={(c) => (onConfig(c), setVerConfig(false))} />
-    </div>
+      <footer className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-line bg-paper/95 p-4 backdrop-blur sm:px-8">
+        <button onClick={() => (paso ? setPaso(paso - 1) : onCerrar())} className={btnBorde}>
+          {paso ? 'Atrás' : 'Cancelar'}
+        </button>
+        {paso < 2 ? (
+          <button disabled={!puedeSeguir} onClick={() => setPaso(paso + 1)} className={btnNegro}>
+            Siguiente <ArrowRight className="size-4" aria-hidden />
+          </button>
+        ) : (
+          <button disabled={!puedeSeguir} onClick={lanzar} className={btnIris}>
+            <Send className="size-4" aria-hidden /> {lanzando ? 'Creando…' : cuando === 'ahora' ? `Lanzar a ${elegidos.length}` : `Programar para ${elegidos.length}`}
+          </button>
+        )}
+      </footer>
+    </Modal>
   );
 }
 
-function Paso({ n, titulo, children }: { n: number; titulo: string; children: ReactNode }) {
+// vista previa tal como la verá el paciente en WhatsApp
+function Vista({ texto, quien }: { texto: string; quien?: string }) {
   return (
     <div>
-      <h3 className="mb-3 flex items-center gap-2.5 font-semibold">
-        <span className="grid size-6 place-items-center rounded-full bg-ink text-xs font-bold text-white">{n}</span>
-        {titulo}
-      </h3>
-      {children}
+      <p className="kicker">Así le llega{quien ? ` a ${quien.split(' ')[0]}` : ''}</p>
+      <div className="mt-2 rounded-[22px] bg-[#e9e2d6] p-4">
+        <div className="ml-auto max-w-[95%] whitespace-pre-line rounded-2xl rounded-tr-md bg-[#d9fdd3] px-4 py-3 text-[13.5px] leading-relaxed shadow-sm">
+          {texto}
+          <span className="mt-1 block text-right text-[10px] text-ink/60">{new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })} ✓✓</span>
+        </div>
+      </div>
     </div>
   );
 }
 
 function TarjetaCampana({
   c,
-  onActualizar,
+  onAccion,
+  onRespuesta,
   onBorrar,
   onAbrir,
 }: {
   c: Campana;
-  onActualizar: (id: string, fn: (c: Campana) => Campana) => void;
+  onAccion: (id: string, accion: AccionCampana) => void;
+  onRespuesta: (id: string, envio: string, respondio: boolean) => void;
   onBorrar: (id: string) => void;
-  onAbrir: (id: string) => void;
+  onAbrir?: (id: string) => void;
 }) {
   const [abierta, setAbierta] = useState(c.estado === 'enviando');
   const n = (e: EstadoEnvio) => c.envios.filter((x) => x.estado === e).length;
   const total = c.envios.length || 1;
   const hechos = c.envios.filter((x) => x.estado !== 'pendiente').length;
   const activa = c.estado === 'enviando' || c.estado === 'programada';
-  const set = (estado: Campana['estado']) => onActualizar(c.id, (x) => ({ ...x, estado }));
   const programadaFutura = c.estado === 'programada' && Date.parse(c.inicio) > Date.now();
 
   const descargar = () => {
@@ -314,25 +456,25 @@ function TarjetaCampana({
           </div>
           <div className="flex flex-wrap gap-1.5">
             {activa && (
-              <button onClick={() => set('pausada')} className={`${btnChico} bg-soft hover:bg-line`}>
+              <button onClick={() => onAccion(c.id, 'pausar')} className={`${btnChico} bg-soft hover:bg-line`}>
                 <Pause className="size-3.5" /> Pausar
               </button>
             )}
             {c.estado === 'pausada' && (
-              <button onClick={() => set('enviando')} className={`${btnChico} bg-ink text-white`}>
+              <button onClick={() => onAccion(c.id, 'reanudar')} className={`${btnChico} bg-ink text-white`}>
                 <Play className="size-3.5" /> Reanudar
               </button>
             )}
             {n('fallo') > 0 && !activa && (
               <button
-                onClick={() => onActualizar(c.id, (x) => ({ ...x, estado: 'enviando', envios: x.envios.map((e) => (e.estado === 'fallo' ? { ...e, estado: 'pendiente', error: undefined } : e)) }))}
+                onClick={() => onAccion(c.id, 'reintentar_fallidos')}
                 className={`${btnChico} bg-soft hover:bg-line`}
               >
                 <RotateCcw className="size-3.5" /> Reintentar fallidos
               </button>
             )}
             {(activa || c.estado === 'pausada') && (
-              <button onClick={() => set('cancelada')} className={`${btnChico} text-muted hover:bg-soft hover:text-ink`}>
+              <button onClick={() => onAccion(c.id, 'cancelar')} className={`${btnChico} text-muted hover:bg-soft hover:text-ink`}>
                 <X className="size-3.5" /> Cancelar
               </button>
             )}
@@ -348,21 +490,24 @@ function TarjetaCampana({
         </div>
 
         {/* progreso */}
-        <div className="mt-5 flex h-2.5 overflow-hidden rounded-full bg-soft">
+        <div className="mt-5 flex h-2.5 overflow-hidden rounded-full bg-soft" role="img" aria-label={`${hechos} de ${c.envios.length} procesados`}>
           <div className="bg-ink transition-[width] duration-700" style={{ width: `${(n('enviado') / total) * 100}%` }} />
           <div className="iris transition-[width] duration-700" style={{ width: `${(n('respondio') / total) * 100}%` }} />
           <div className="bg-rojo transition-[width] duration-700" style={{ width: `${(n('fallo') / total) * 100}%` }} />
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
           <span className="flex flex-wrap gap-x-4 gap-y-1">
-            <span>
-              <b className="num text-ink">{hechos}</b>/{c.envios.length} procesados
+            <span className="flex items-center gap-1.5">
+              <span className="size-2 rounded-full bg-ink" aria-hidden />
+              <b className="num text-ink">{n('enviado') + n('respondio')}</b> de {c.envios.length} enviados
             </span>
-            <span>
+            <span className="flex items-center gap-1.5">
+              <span className="iris size-2 rounded-full" aria-hidden />
               <b className="num text-ink">{n('respondio')}</b> respondieron
             </span>
             {n('fallo') > 0 && (
-              <span className="text-rojo">
+              <span className="flex items-center gap-1.5 text-rojo">
+                <span className="size-2 rounded-full bg-rojo" aria-hidden />
                 <b className="num">{n('fallo')}</b> fallaron
               </span>
             )}
@@ -377,22 +522,21 @@ function TarjetaCampana({
         <ul className="hoja max-h-80 divide-y divide-line overflow-y-auto border-t border-line bg-paper/60">
           {c.envios.map((e, i) => (
             <li key={e.pacienteId + i} className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm sm:px-6">
-              <button onClick={() => onAbrir(e.pacienteId)} className="min-w-0 flex-1 truncate text-left font-medium hover:underline">
-                {e.nombre}
-              </button>
+              {onAbrir ? (
+                <button onClick={() => onAbrir(e.pacienteId)} className="min-w-0 flex-1 truncate text-left font-medium hover:underline">
+                  {e.nombre}
+                </button>
+              ) : (
+                <span className="min-w-0 flex-1 truncate font-medium">{e.nombre}</span>
+              )}
               {e.error && <span className="max-w-[220px] truncate text-xs text-rojo" title={e.error}>{e.error}</span>}
               {e.fecha && <span className="num text-xs text-muted">{new Date(e.fecha).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</span>}
               <span key={e.estado} className="pop">
                 <Etiqueta tono={ESTADO_ENVIO[e.estado].tono}>{ESTADO_ENVIO[e.estado].t}</Etiqueta>
               </span>
-              {(e.estado === 'enviado' || e.estado === 'respondio') && (
+              {(e.estado === 'enviado' || e.estado === 'respondio') && e.id && (
                 <button
-                  onClick={() =>
-                    onActualizar(c.id, (x) => ({
-                      ...x,
-                      envios: x.envios.map((y, j) => (j === i ? { ...y, estado: y.estado === 'respondio' ? 'enviado' : 'respondio' } : y)),
-                    }))
-                  }
+                  onClick={() => onRespuesta(c.id, e.id!, e.estado !== 'respondio')}
                   className={`${btnChico} bg-soft text-ink/70 hover:text-ink`}
                 >
                   {e.estado === 'respondio' ? 'Quitar respuesta' : 'Respondió'}
@@ -409,53 +553,36 @@ function TarjetaCampana({
   );
 }
 
-function ConfigModal({ abierto, config, onCerrar, onGuardar }: { abierto: boolean; config: ConfigWA; onCerrar: () => void; onGuardar: (c: ConfigWA) => void }) {
-  const [c, setC] = useState(config);
+// La conexión con WhatsApp Business vive en el servidor: el token nunca pasa por el navegador
+function ComoConectar({ abierto, conectado, onCerrar }: { abierto: boolean; conectado: boolean; onCerrar: () => void }) {
   return (
-    <Modal abierto={abierto} onCerrar={onCerrar} titulo="Conectar WhatsApp Business" ancho="max-w-xl">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          onGuardar(c);
-        }}
-        className="p-6 sm:p-8"
-      >
-        <h2 className="text-2xl font-bold tracking-tight">Conectar WhatsApp Business</h2>
+    <Modal abierto={abierto} onCerrar={onCerrar} titulo="Conexión con WhatsApp Business" ancho="max-w-xl">
+      <div className="p-6 sm:p-8">
+        <h2 className="text-2xl font-bold tracking-tight">Conexión con WhatsApp Business</h2>
         <p className="mt-2 text-sm text-muted">
-          Con la API oficial de Meta (WhatsApp Cloud API) las campañas salen solas desde el número de la clínica. Los datos se obtienen en Meta for Developers → WhatsApp →
-          Configuración de la API.
+          {conectado
+            ? 'El servidor está conectado a WhatsApp Cloud API: las campañas salen desde el número de la clínica.'
+            : 'Ahora mismo las campañas corren en modo simulación: quedan registradas, pero los mensajes no salen.'}
         </p>
-        <div className="mt-6 space-y-3">
-          <label className="block text-xs font-medium text-muted">
-            Token de acceso
-            <input type="password" value={c.token} onChange={(e) => setC({ ...c, token: e.target.value })} className="field mt-1" autoComplete="off" />
-          </label>
-          <label className="block text-xs font-medium text-muted">
-            ID del número de teléfono
-            <input value={c.phoneId} onChange={(e) => setC({ ...c, phoneId: e.target.value })} className="field mt-1" placeholder="Ej: 106540352242922" />
-          </label>
-          <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
-            <label className="block text-xs font-medium text-muted">
-              Plantilla aprobada (opcional)
-              <input value={c.plantilla} onChange={(e) => setC({ ...c, plantilla: e.target.value })} className="field mt-1" placeholder="recuperacion_pacientes" />
-            </label>
-            <label className="block text-xs font-medium text-muted">
-              Idioma
-              <input value={c.idioma} onChange={(e) => setC({ ...c, idioma: e.target.value })} className="field mt-1" placeholder="es" />
-            </label>
-          </div>
+        <div className="mt-5 rounded-2xl bg-soft p-4 text-sm leading-relaxed">
+          <p className="font-semibold">Para enviar de verdad, quien administra el servidor configura en el .env del backend:</p>
+          <pre className="mt-2 overflow-x-auto rounded-xl bg-white p-3 text-xs">{`WHATSAPP_MODO=meta_cloud
+WHATSAPP_API_TOKEN=…
+WHATSAPP_PHONE_ID=…
+WHATSAPP_PLANTILLA_POR_DEFECTO=…   (opcional)`}</pre>
+          <p className="mt-2 text-xs text-muted">
+            Los datos se obtienen en Meta for Developers → WhatsApp → Configuración de la API. El token queda solo en el servidor; el panel nunca lo ve ni lo guarda.
+          </p>
         </div>
-        <p className="mt-4 rounded-2xl bg-soft p-3 text-xs leading-relaxed text-muted">
-          WhatsApp solo permite mensajes libres a quien escribió en las últimas 24 h. Para campañas a pacientes que no han escrito, usa una plantilla aprobada por Meta; el
-          panel le pasa el nombre del paciente como variable. En este prototipo el token se guarda en este navegador; en producción debe ir en un servidor.
+        <p className="mt-4 text-xs leading-relaxed text-muted">
+          WhatsApp solo permite mensajes libres a quien escribió en las últimas 24 h. Para escribirle a pacientes que no han escrito, se usa una plantilla aprobada por Meta.
         </p>
-        <div className="mt-6 flex justify-between gap-2">
-          <button type="button" onClick={() => onGuardar({ token: '', phoneId: '', plantilla: '', idioma: 'es' })} className={btnBorde}>
-            Desconectar
+        <div className="mt-6 flex justify-end">
+          <button onClick={onCerrar} className={btnNegro}>
+            Entendido
           </button>
-          <button className={btnNegro}>Guardar conexión</button>
         </div>
-      </form>
+      </div>
     </Modal>
   );
 }

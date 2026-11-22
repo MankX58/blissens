@@ -15,30 +15,39 @@ La estructura exacta (tipos, llaves, índices) está en [`esquema.sql`](esquema.
 | Teléfonos | `+57` seguido de 10 dígitos (`+573001234567`). Si no hay celular válido, `NULL`. |
 | Pacientes | La llave es `numero_paciente` (el `# Paciente` del software de la clínica). En la app se muestra como `#36`. |
 | Nombres | Las tablas de la app usan `snake_case` en español. Las de Better Auth usan `camelCase` en inglés (`userId`, `expiresAt`). |
-| Quién hizo qué | `registrado_por` / `asignado_por` = `user.id` del usuario de la sesión (`usuario_actual(request)["id"]`). Si se borra la cuenta queda en `NULL`. |
+| Quién hizo qué | `registrado_por` / `asignado_por` = `user.id` del usuario de la sesión (`usuario.id` de la dependencia `requiere_rol(...)`). Si se borra la cuenta queda en `NULL`. |
 | Mayúsculas | Los valores de catálogo internos van en minúscula y `snake_case` (`'sin_reagendar'`). Los textos que vienen del software (estados de cita, nombres) se guardan tal cual. |
 
 ## Quién escribe cada tabla
 
 | Grupo | Tablas | Quién escribe | FastAPI |
 |---|---|---|---|
-| Cuentas | `user`, `session`, `account`, `verification` | Better Auth (`auth/`) | **Solo lectura**, con `sesion.py`. Las cuentas se crean y cambian desde la pantalla *Cuentas*. |
-| Catálogos | `especialidades`, `profesionales`, `sucursales`, `sillones`, `usuarios_sistema`, `estados_cita`, `eventos_cita`, `aranceles`, `categorias_arancel`, `acciones_arancel`, `guiones` | `scripts/combinar.ts`, `scripts/alinear.ts` | Lectura. |
+| Cuentas | `user`, `session`, `account`, `verification` | Better Auth (`auth/`) | **Solo lectura**, con `app/modules/auth/sesion_service.py` del backend. Las cuentas se crean y cambian desde la pantalla *Cuentas*. |
+| Catálogos | `especialidades`, `profesionales`, `sucursales`, `sillones`, `usuarios_sistema`, `estados_cita`, `eventos_cita`, `aranceles`, `categorias_arancel`, `acciones_arancel`, `guiones` | ETL del backend (`app/modules/ingesta_excel/`) | Lectura. |
 | Agenda importada | `citas`, `cita_eventos`, `tratamientos`, `apoderados` | Carga de Excel (`scripts/`) | Lectura. Escritura solo al cargar un Excel nuevo. |
 | Pacientes | `pacientes`, `etiquetas_paciente` | Carga de Excel + reglas | Ficha: lectura. `estado_seguimiento`, `motivo_cancelacion` y `recuperado_el` cambian con el trabajo del día. Las columnas calculadas se recalculan (ver abajo). |
-| Trabajo del panel | `contactos_seguimiento`, `notas_paciente`, `ciclos_seguimiento`, `agenda_libre`, `ofertas_cupo`, `campanas`, `envios_campana` | **FastAPI** | Lectura y escritura. Hoy están vacías porque el panel aún guarda esto en el navegador. |
+| Trabajo del panel | `contactos_seguimiento`, `notas_paciente`, `ciclos_seguimiento`, `agenda_libre`, `ofertas_cupo`, `campanas`, `envios_campana` | **FastAPI** | Lectura y escritura: el panel registra aquí todo lo que se trabaja (recargar los Excel no lo borra). |
 | Control | `cargas_excel`, `configuracion` | Carga de Excel / FastAPI | Lectura y escritura. |
 
 ## Roles
 
-Los roles viven en `user.role`. El panel y Better Auth los definen en `src/lib/roles.ts`. Para proteger un endpoint: `Depends(requiere_rol(...))`. `direccion` pasa siempre.
+Los roles viven en `user.role`. El panel y Better Auth los definen una sola vez en `src/lib/roles.ts`, con qué hace, qué ve y qué no ve cada uno. Para proteger un endpoint: `Depends(requiere_rol(...))`. `direccion` (Gerencia) pasa siempre.
 
-| `user.role` | Secciones | Ejemplo de dependencia |
-|---|---|---|
-| `auxiliar` | Hoy toca contactar, Pacientes, Cargar agenda | `requiere_rol("auxiliar")` |
-| `recepcion` | Agenda libre | `requiere_rol("recepcion")` |
-| `mercadeo` (se muestra como *Campañas de reactivación*) | Campañas | `requiere_rol("mercadeo")` |
-| `direccion` | Todo + Indicadores + Cuentas | `requiere_rol("direccion")` |
+| `user.role` | Se muestra como | Secciones | Qué **no** debe recibir de la API |
+|---|---|---|---|
+| `auxiliar` | Recepción y seguimiento | Inicio, Hoy toca contactar, Pacientes, Agenda libre, Cargar agenda | Indicadores, campañas, cuentas |
+| `especialista` | Especialista | Inicio, Mis pacientes, Mi agenda libre | **Pacientes y cupos de otro especialista.** Filtrar con `user.profesional` (`'Dra. Sara López'` \| `'Dr. Juan Manuel Olarte'`) contra `pacientes.profesional_principal` y `agenda_libre.profesional` |
+| `mercadeo` | Campañas de reactivación | Inicio, Campañas | Expedientes, notas internas (`notas_paciente`, `observaciones_medicas`), agenda, indicadores, cuentas |
+| `direccion` | Gerencia | Todas + Indicadores + Cuentas | — |
+
+`requiere_rol(...)` devuelve `UsuarioSesion(id, nombre, email, rol, profesional)`. El especialista ya queda limitado a su agenda en el backend: `agenda_permitida(usuario)` da su `profesional` (o `None` si no hay límite) y `comprobar_agenda(usuario, profesional)` responde 403 si el paciente o cupo es de otra agenda. Ejemplo (así está `GET /api/v1/pacientes`):
+
+```python
+@enrutador.get("")
+def listar(profesional: str | None = None, usuario=Depends(requiere_rol("auxiliar", "especialista", "mercadeo"))):
+    profesional = agenda_permitida(usuario) or profesional  # el especialista solo ve su agenda
+    ...
+```
 
 ---
 
@@ -46,12 +55,12 @@ Los roles viven en `user.role`. El panel y Better Auth los definen en `src/lib/r
 
 | Tabla | Campos clave |
 |---|---|
-| `user` | `id` (texto), `name`, `email` (único), `emailVerified`, `image`, **`role`** (`auxiliar` \| `recepcion` \| `mercadeo` \| `direccion`), `banned` (1 = desactivada), `banReason`, `banExpires`, `createdAt`, `updatedAt` |
+| `user` | `id` (texto), `name`, `email` (único), `emailVerified`, `image`, **`role`** (`auxiliar` \| `especialista` \| `mercadeo` \| `direccion`), **`profesional`** (solo especialistas: su agenda; lo asigna gerencia), `banned` (1 = desactivada), `banReason`, `banExpires`, `createdAt`, `updatedAt` |
 | `session` | `token` (el valor de la cookie antes del `.`), `userId` → `user.id`, `expiresAt`, `ipAddress`, `userAgent`, `impersonatedBy` |
 | `account` | `userId` → `user.id`, `providerId` (`'google'` o `'credential'`), `accountId`, `password` (hash, solo con `'credential'`). Tokens de Google: `accessToken`, `refreshToken`, `idToken`, `accessTokenExpiresAt`, `refreshTokenExpiresAt`, `scope` (**secretos: nunca devolverlos en la API**). |
 | `verification` | `identifier`, `value`, `expiresAt`. Estados temporales del inicio con Google. No se usa desde Python. |
 
-Una sesión es válida si la firma de la cookie cuadra con `BETTER_AUTH_SECRET`, `expiresAt` es futuro y el usuario no tiene `banned = 1` vigente. Eso lo hace `sesion.py`.
+Una sesión es válida si la firma de la cookie cuadra con `BETTER_AUTH_SECRET`, `expiresAt` es futuro y el usuario no tiene `banned = 1` vigente. Eso lo hace `app/modules/auth/sesion_service.py` del backend.
 
 ## Catálogos
 
@@ -82,7 +91,7 @@ Una sesión es válida si la firma de la cookie cuadra con `BETTER_AUTH_SECRET`,
 | `antiguedad_cita` | `'Nuevo'` \| `'Antiguo'` \| `'No Aplica'` |
 | `profesional` / `id_profesional`, `sillon` / `id_sillon`, `sucursal` / `id_sucursal` | Texto original / llave al catálogo |
 | `id_usuario_agendo` | → `usuarios_sistema` |
-| `numero_tratamiento` | → `tratamientos` (sin restricción en SQLite; `combinar.ts` lo valida) |
+| `numero_tratamiento` | → `tratamientos` (sin restricción en SQLite; el ETL del backend lo mantiene) |
 | `orden_fila_excel` | Posición en el Excel. **Dentro del mismo día, la primera fila es la más reciente.** |
 | `comentario_cita`, `motivo_atencion`, `tipo_paciente`, `fecha_creacion_cita`, `mes_cita`, `anio_cita`, `en_archivo_octubre`, `especialidad` | Datos del Excel |
 
@@ -132,7 +141,8 @@ Una sesión es válida si la firma de la cookie cuadra con `BETTER_AUTH_SECRET`,
 | `nivel_riesgo` | `'alto'` (3+ seguidas) \| `'medio'` (1-2 seguidas o 3+ en total) \| `'bajo'` |
 | `score_riesgo` | 0-100 = `fallos_seguidos` × 100 / 3, con tope en 100 |
 | `requiere_doble_confirmacion` | 1 si `fallos_seguidos` ≥ 3 |
-| `es_vip`, `es_control_limpieza`, `pausa_mayor_30_dias` | Booleanos |
+| `es_vip`, `motivo_vip` | VIP (RN-08) y por qué: `'Internacional'` \| `'Deportista de alto nivel'` \| `'Plan de $10 M o más'` \| `'Implantes'` \| `'Rehabilitación oral'` \| `'Coronas'` \| `'Carillas o diseño de sonrisa'` \| `'Alineadores'` \| `'Valoración virtual (paciente del exterior)'` |
+| `es_control_limpieza`, `pausa_mayor_30_dias` | Booleanos |
 
 *Seguimiento 3-7-15* (lo cambia el trabajo del panel)
 
@@ -146,7 +156,8 @@ Una sesión es válida si la firma de la cookie cuadra con `BETTER_AUTH_SECRET`,
 
 | Campo | Valores |
 |---|---|
-| `dias_desde_evento` | Días desde que empezó a correr el 3-7-15. Negativo = el control aún no vence. |
+| `fecha_evento` | Desde cuándo corre el 3-7-15 del ciclo vigente: la última cita; +30 días en *pausa* (RN-03); +4 o 6 meses en *limpieza* (RN-04). |
+| `dias_desde_evento` | Días desde `fecha_evento` (foto a la fecha de corte). |
 | `semaforo` | `'rojo'` (0-3 días, VIP o riesgo alto) \| `'amarillo'` (4-14 días) \| `'verde'` (15+ días o limpieza) |
 | `paso_protocolo_actual` | `3` \| `7` \| `15` \| `NULL` |
 | `fecha_proximo_contacto` | `DATE` |
@@ -160,7 +171,7 @@ Una sesión es válida si la firma de la cookie cuadra con `BETTER_AUTH_SECRET`,
 | `valor_estimado_fuente` | `'arancel_comentario'` \| `'arancel_tipo_cita'` \| `'sin_estimacion'` |
 | `accion_arancel_referencia` | Acciones del arancel usadas, separadas por `' + '` |
 
-Las reglas exactas están en `src/lib/reglas.ts` y `src/lib/excel.ts`. Si se portan a Python, `scripts/alinear.ts` sirve de prueba: compara la base con la app y falla si hay diferencias.
+Las reglas están en el dominio del backend (`app/domain/`): `clasificador_cartera.py` (segmento, caso, desde cuándo corre el 3-7-15, fallos seguidos) y `evaluador_semaforo_y_riesgo.py` (3-7-15 por días, semáforo, riesgo). El panel aplica las mismas en `src/lib/reglas.ts`.
 
 **`etiquetas_paciente`** (`numero_paciente`, `etiqueta`): `'VIP'` \| `'Valoración virtual'` \| `'Rehabilitación'` \| `'Alineadores'` \| `'Convenio FLAIRES'`.
 

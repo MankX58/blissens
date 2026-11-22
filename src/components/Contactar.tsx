@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ArrowRightLeft, Check, Mail, MessageCircle, Phone } from 'lucide-react';
+import { ArrowRightLeft, Check, ChevronDown, Mail, MessageCircle, Phone } from 'lucide-react';
 import type { Motivo, Paciente, Resultado } from '../types';
 import { GUIONES } from '../data/guiones';
 import { N_REASIGNACION, guionesPara, guionReasignacion } from '../lib/guiones';
@@ -18,7 +18,7 @@ import {
   semaforo,
   sumarDias,
 } from '../lib/reglas';
-import { Iniciales, Insignias, Meta, Modal, Punto, SEMAFORO_TXT, btnBorde, btnNegro } from './ui';
+import { Iniciales, Insignias, Modal, Punto, SEMAFORO_TXT, btnBorde, btnNegro } from './ui';
 
 const RESULTADOS: { id: Resultado; ayuda: string }[] = [
   { id: 'agendo', ayuda: 'Paciente recuperado' },
@@ -83,126 +83,120 @@ export function Contactar({
   const pide = /\[NUEVA (FECHA|HORA)\]/.test(elegido.texto) || !!nuevaFecha;
   const celValido = normalizarCelular(cel);
 
+  const ultimo = p.contactos.at(-1);
+  const porQue = `${CASO_TXT[p.caso]} el ${fechaCorta(p.ultimaCita?.fecha ?? p.fechaEvento)}${p.ultimaCita?.estado ? ` (${p.ultimaCita.estado.toLowerCase()})` : ''}`;
+  const consecuencia =
+    resultado === 'agendo'
+      ? 'Quedará como recuperado en los indicadores.'
+      : resultado === 'no_interesa'
+        ? 'Sale de la lista y se guarda el motivo.'
+        : resultado && sigPaso
+          ? `Volverá a aparecer el ${fechaCorta(sumarDias(p.fechaEvento, sigPaso))} (día ${sigPaso}).`
+          : resultado
+            ? 'Era el rescate del día 15: pasa a campañas de reactivación.'
+            : 'Elige qué respondió para guardar.';
+
   return (
-    <Modal abierto onCerrar={onCerrar} titulo={`Contactar a ${p.nombre}`} ancho="max-w-5xl">
-      <div className="grid md:grid-cols-[310px_1fr]">
-        {/* ficha */}
-        <aside className="order-last bg-ink p-6 text-white md:order-none md:rounded-l-[28px]">
-          <div className="flex items-center gap-3">
-            <Iniciales nombre={p.nombre} claro />
-            <div className="min-w-0">
-              <p className="truncate font-semibold">{p.nombre}</p>
-              <Meta p={p} doctor={false} oscuro className="block" />
-            </div>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            <Insignias p={p} oscuro detalle />
-          </div>
-
-          <dl className="mt-6 space-y-3 text-sm">
-            <Dato k="Segmento" v={`${p.grupo} · ${GRUPO_TXT[p.grupo]}`} />
-            <Dato k="Caso" v={`${CASO_TXT[p.caso]} · ${fechaCorta(p.fechaEvento)}`} />
-            {p.ultimaCita && (
-              <Dato k="Última cita" v={`${fechaCorta(p.ultimaCita.fecha)}${p.ultimaCita.hora ? ` ${p.ultimaCita.hora}` : ''} · ${p.ultimaCita.estado} (${p.ultimaCita.tipo})`} />
-            )}
-            <Dato k="Comentario / tratamiento" v={p.tratamiento} />
-            <Dato k="Especialista" v={p.especialista} />
-            {p.valor > 0 && <Dato k="Valor estimado (arancel)" v={pesos(p.valor)} />}
-            <Dato k="Celular" v={p.telefono || 'Sin celular'} />
-            {p.email && <Dato k="Correo" v={p.email} />}
-            {p.apoderado && <Dato k="Apoderado" v={p.apoderado} />}
-          </dl>
-
-          <p className="mt-7 text-[11px] font-semibold uppercase tracking-[.18em] text-white/50">Regla 3 · 7 · 15</p>
-          <ol className="mt-3 space-y-3">
-            {PASOS.map((d) => {
-              const c = p.contactos.find((x) => x.paso === d);
-              const actual = d === paso;
-              const pasado = !c && paso !== null && d < paso;
-              return (
-                <li key={d} className="flex items-start gap-3 text-sm">
-                  <span
-                    className={`grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-bold ${
-                      c ? 'bg-white text-ink' : actual ? 'iris text-ink' : 'border border-white/20 text-white/60'
-                    }`}
-                  >
-                    {c ? <Check className="size-3.5" /> : d}
-                  </span>
-                  <div className="leading-tight">
-                    <p className={actual ? 'font-semibold' : c ? 'text-white/85' : 'text-white/60'}>
-                      {d === 3 ? 'Urgente (0-3 días)' : d === 7 ? 'Seguimiento (día 7)' : 'Rescate (día 15)'}
-                    </p>
-                    <p className="text-xs text-white/50">
-                      {c ? RESULTADO_TXT[c.resultado] : actual ? 'Toca ahora' : pasado ? 'Se pasó sin contacto' : fechaCorta(sumarDias(p.fechaEvento, d))}
-                    </p>
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        </aside>
-
-        {/* flujo */}
-        <section className="p-6 sm:p-8">
-          {color && (
-            <p className="flex items-center gap-2 pr-10 text-xs font-semibold uppercase tracking-[.14em] text-muted">
-              <Punto color={color} /> {SEMAFORO_TXT[color]} · etapa día {paso} · {diasEntre(p.fechaEvento, hoy)} días desde el evento
+    <Modal abierto onCerrar={onCerrar} titulo={`Contactar a ${p.nombre}`} ancho="max-w-2xl">
+      {/* quién es y por qué toca hoy */}
+      <header className="border-b border-line p-5 pr-16 sm:p-7 sm:pr-16">
+        <div className="flex items-center gap-3">
+          <Iniciales nombre={p.nombre} />
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-bold leading-tight">{p.nombre}</h2>
+            <p className="truncate text-xs text-muted">
+              {p.idPaciente} · {p.especialista}
             </p>
-          )}
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          <Insignias p={p} detalle />
+        </div>
 
-          {!p.telefono && (
-            <div className="pop mt-5 rounded-2xl border border-amarillo/40 bg-amarillo/10 p-4">
-              <p className="text-sm font-semibold">⚠️ Dato de contacto faltante</p>
-              <p className="mt-0.5 text-xs text-muted">Este paciente no tiene celular en la agenda de octubre. Agrégalo o escríbele por correo.</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <input value={cel} onChange={(e) => setCel(e.target.value)} placeholder="Celular, ej. 310 892 6704" className="field w-auto flex-1" inputMode="tel" />
-                <button disabled={!celValido} onClick={() => onTelefono(p.id, celValido)} className={btnNegro}>
-                  Guardar celular
-                </button>
-                {p.email && (
-                  <a href={`mailto:${p.email}?subject=${encodeURIComponent('BLISSENS ODONTOLOGÍA')}&body=${encodeURIComponent(texto)}`} className={btnBorde}>
-                    <Mail className="size-4" /> Enviar correo
-                  </a>
-                )}
-              </div>
-              {cel && !celValido && <p className="mt-1.5 text-xs text-rojo">Escribe un celular de 10 dígitos que empiece por 3, o con indicativo.</p>}
-            </div>
-          )}
+        <div className="mt-4 grid gap-3 rounded-2xl bg-soft p-4 sm:grid-cols-[1.3fr_1fr_auto] sm:items-center">
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 text-sm font-semibold">
+              {color && <Punto color={color} />}
+              {color ? SEMAFORO_TXT[color] : 'Sin etapa'}
+              {paso && <span className="font-normal text-muted">· día {paso}</span>}
+            </p>
+            <p className="mt-0.5 text-xs text-muted">
+              {porQue} · hace {diasEntre(p.fechaEvento, hoy)} días
+            </p>
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium" title={p.tratamiento}>
+              {p.tratamiento || 'Sin tratamiento registrado'}
+            </p>
+            <p className="text-xs text-muted">{p.valor > 0 ? `${pesos(p.valor)} según el arancel` : 'Tratamiento'}</p>
+          </div>
+          <Pasos p={p} paso={paso} />
+        </div>
 
-          {p.especialista === 'Dr. Juan Manuel Olarte' && (
-            <div className="mt-5 flex flex-col gap-3 rounded-2xl bg-sky/20 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm">
-                <b>¿El Dr. Olarte está de viaje?</b> <span className="text-muted">Ofrece la cita con la Dra. Sara López (guion oficial #{N_REASIGNACION}).</span>
-              </p>
-              <button
-                onClick={() => {
-                  onReasignar(p.id);
-                  setGuionId(String(N_REASIGNACION));
-                  setTexto(guionReasignacion(p, ctx));
-                }}
-                className={`${btnBorde} shrink-0`}
-              >
-                <ArrowRightLeft className="size-4" /> Reasignar a la Dra. Sara
+        <details className="group mt-3 text-sm">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-xs font-semibold text-ink/70 hover:text-ink [&::-webkit-details-marker]:hidden">
+            <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden /> Ver ficha
+          </summary>
+          <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+            <Dato k="Celular" v={p.telefono || 'Sin celular'} />
+            <Dato k="Correo" v={p.email || '—'} />
+            {p.apoderado && <Dato k="Apoderado" v={p.apoderado} />}
+            <Dato k="Segmento" v={`${p.grupo}. ${GRUPO_TXT[p.grupo]}`} />
+            {p.motivoVip && <Dato k="Por qué es VIP" v={p.motivoVip} />}
+            <Dato k="Riesgo" v={`${p.nivelRiesgo} · ${p.fallosSeguidos} seguidas sin asistir`} />
+            {ultimo && <Dato k="Último contacto" v={`${fechaCorta(ultimo.fecha)} · ${RESULTADO_TXT[ultimo.resultado]}`} />}
+          </dl>
+        </details>
+
+        {p.especialista === 'Dr. Juan Manuel Olarte' && (
+          <button
+            onClick={() => {
+              onReasignar(p.id);
+              setGuionId(String(N_REASIGNACION));
+              setTexto(guionReasignacion(p, ctx));
+            }}
+            className="mt-2 inline-flex items-start gap-1.5 text-left text-xs font-semibold text-ink/70 hover:text-ink"
+          >
+            <ArrowRightLeft className="size-3.5" aria-hidden /> ¿El Dr. Olarte está de viaje? Reasignar a la Dra. Sara
+          </button>
+        )}
+      </header>
+
+      <div className="space-y-7 p-5 sm:p-7">
+        {!p.telefono && (
+          <div className="rounded-2xl border border-amarillo/40 bg-amarillo/10 p-4">
+            <p className="text-sm font-semibold">Falta el celular</p>
+            <p className="mt-0.5 text-xs text-muted">Agrégalo para escribirle por WhatsApp{p.email ? ', o envíale el mensaje por correo' : ''}.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <input value={cel} onChange={(e) => setCel(e.target.value)} placeholder="Ej. 310 892 6704" className="field w-auto min-w-0 flex-1" inputMode="tel" aria-label="Celular" />
+              <button disabled={!celValido} onClick={() => onTelefono(p.id, celValido)} className={btnNegro}>
+                Guardar
               </button>
             </div>
-          )}
+            {cel && !celValido && <p className="mt-1.5 text-xs text-rojo">Escribe un celular de 10 dígitos que empiece por 3, o con indicativo.</p>}
+          </div>
+        )}
 
-          <Paso n={1} titulo="Escribe el mensaje" hecho={enviado}>
-            <p className="mb-2 text-xs text-muted">Recomendados para este caso (matriz 5.1 del SRS):</p>
-            <div className="flex flex-wrap gap-1.5">
-              {lista.sugeridos.map((g) => (
-                <button
-                  key={g.id}
-                  onClick={() => setGuionId(g.id)}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${g.id === elegido.id ? 'bg-ink text-white' : 'bg-soft text-ink/70 hover:text-ink'}`}
-                  title={g.categoria}
-                >
-                  {g.titulo}
-                </button>
-              ))}
-            </div>
-            <select value={elegido.id} onChange={(e) => setGuionId(e.target.value)} className="field mt-2" aria-label="Todos los guiones oficiales">
-              {lista.sugeridos.some((g) => g.id === '6+24') && <option value="6+24">Doble confirmación · riesgo alto (02 + 09)</option>}
+        <Paso n={1} titulo="Mensaje" hecho={enviado}>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Guiones recomendados">
+            {lista.sugeridos.map((g) => (
+              <button
+                key={g.id}
+                onClick={() => setGuionId(g.id)}
+                aria-pressed={g.id === elegido.id}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold ${g.id === elegido.id ? 'bg-ink text-white' : 'bg-soft text-ink/70 hover:text-ink'}`}
+                title={g.categoria}
+              >
+                {g.titulo}
+              </button>
+            ))}
+            <select
+              value={lista.sugeridos.some((g) => g.id === elegido.id) ? '' : elegido.id}
+              onChange={(e) => e.target.value && setGuionId(e.target.value)}
+              className="rounded-full border border-dashed border-line bg-transparent px-3 py-1.5 text-xs font-semibold text-ink/70 hover:text-ink"
+              aria-label="Otro guion oficial"
+            >
+              <option value="">Otro guion…</option>
               {[...new Set(GUIONES.map((g) => g.categoria))].map((cat) => (
                 <optgroup key={cat} label={cat}>
                   {GUIONES.filter((g) => g.categoria === cat).map((g) => (
@@ -213,116 +207,140 @@ export function Contactar({
                 </optgroup>
               ))}
             </select>
-            {pide && (
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <label className="text-xs font-medium text-muted">
-                  Nueva fecha
-                  <input type="date" min={hoy} value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)} className="field mt-1" />
-                </label>
-                <label className="text-xs font-medium text-muted">
-                  Nueva hora
-                  <input type="time" value={nuevaHora} onChange={(e) => setNuevaHora(e.target.value)} className="field mt-1" />
-                </label>
-              </div>
-            )}
-            <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={6} className="field mt-2 resize-y leading-relaxed" aria-label="Mensaje" />
-            {/\[[A-ZÁÉÍÓÚ /]+\]/.test(texto) && <p className="mt-1 text-xs text-amarillo">Quedan campos entre corchetes por completar antes de enviar.</p>}
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => {
-                  window.open(linkWhatsApp(p.telefono, texto), '_blank', 'noopener');
-                  setEnviado(true);
-                }}
-                disabled={!p.telefono}
-                className={btnNegro}
-              >
-                <MessageCircle className="size-4" /> Abrir WhatsApp con este mensaje
-              </button>
-              {p.telefono && (
-                <a href={`tel:${p.telefono}`} onClick={() => setEnviado(true)} className={btnBorde}>
-                  <Phone className="size-4" /> Llamar
-                </a>
-              )}
-              {p.telefono && p.email && (
-                <a href={`mailto:${p.email}?subject=${encodeURIComponent('BLISSENS ODONTOLOGÍA')}&body=${encodeURIComponent(texto)}`} onClick={() => setEnviado(true)} className={btnBorde}>
-                  <Mail className="size-4" /> Correo
-                </a>
-              )}
-            </div>
-          </Paso>
-
-          <Paso n={2} titulo="¿Qué respondió?" hecho={!!resultado}>
-            <div className="grid grid-cols-2 gap-2">
-              {RESULTADOS.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => setResultado(r.id)}
-                  className={`rounded-2xl border p-3 text-left ${resultado === r.id ? 'border-ink bg-ink text-white' : 'border-line bg-white hover:border-ink/40'}`}
-                >
-                  <span className="block text-sm font-semibold">{RESULTADO_TXT[r.id]}</span>
-                  <span className={`text-xs ${resultado === r.id ? 'text-white/60' : 'text-muted'}`}>{r.ayuda}</span>
-                </button>
-              ))}
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          </div>
+          {pide && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
               <label className="text-xs font-medium text-muted">
-                Motivo por el que no siguió
-                <select value={motivo} onChange={(e) => setMotivo(e.target.value as Motivo)} className="field mt-1">
-                  {Object.entries(MOTIVO_TXT).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
+                Nueva fecha
+                <input type="date" min={hoy} value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)} className="field mt-1" />
               </label>
               <label className="text-xs font-medium text-muted">
+                Nueva hora
+                <input type="time" value={nuevaHora} onChange={(e) => setNuevaHora(e.target.value)} className="field mt-1" />
+              </label>
+            </div>
+          )}
+          <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={5} className="field mt-3 resize-y leading-relaxed" aria-label="Mensaje" />
+          {/\[[A-ZÁÉÍÓÚ /]+\]/.test(texto) && <p className="mt-1 text-xs text-amarillo">Completa los campos entre corchetes antes de enviar.</p>}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => {
+                window.open(linkWhatsApp(p.telefono, texto), '_blank', 'noopener');
+                setEnviado(true);
+              }}
+              disabled={!p.telefono}
+              className={btnNegro}
+            >
+              <MessageCircle className="size-4" aria-hidden /> Abrir WhatsApp
+            </button>
+            {p.telefono && (
+              <a href={`tel:${p.telefono}`} onClick={() => setEnviado(true)} className={btnBorde}>
+                <Phone className="size-4" aria-hidden /> Llamar
+              </a>
+            )}
+            {p.email && (
+              <a href={`mailto:${p.email}?subject=${encodeURIComponent('BLISSENS ODONTOLOGÍA')}&body=${encodeURIComponent(texto)}`} onClick={() => setEnviado(true)} className={btnBorde}>
+                <Mail className="size-4" aria-hidden /> Correo
+              </a>
+            )}
+          </div>
+        </Paso>
+
+        <Paso n={2} titulo="¿Qué respondió?" hecho={!!resultado}>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Respuesta del paciente">
+            {RESULTADOS.map((r) => (
+              <button
+                key={r.id}
+                role="radio"
+                aria-checked={resultado === r.id}
+                onClick={() => setResultado(r.id)}
+                className={`rounded-2xl border px-3 py-2.5 text-left ${resultado === r.id ? 'border-ink bg-ink text-white' : 'border-line bg-white hover:border-ink/40'}`}
+              >
+                <span className="block text-sm font-semibold">{RESULTADO_TXT[r.id]}</span>
+                <span className={`text-[11px] ${resultado === r.id ? 'text-white/70' : 'text-muted'}`}>{r.ayuda}</span>
+              </button>
+            ))}
+          </div>
+          {resultado && (
+            <div className="hoja mt-3 grid gap-2 sm:grid-cols-2">
+              {resultado !== 'agendo' && (
+                <label className="text-xs font-medium text-muted">
+                  ¿Por qué no siguió?
+                  <select value={motivo} onChange={(e) => setMotivo(e.target.value as Motivo)} className="field mt-1">
+                    {Object.entries(MOTIVO_TXT).map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className={`text-xs font-medium text-muted ${resultado === 'agendo' ? 'sm:col-span-2' : ''}`}>
                 Nota (opcional)
                 <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej: prefiere martes en la tarde" className="field mt-1" />
               </label>
             </div>
-          </Paso>
-
-          <div className="mt-6 flex flex-col-reverse items-stretch justify-between gap-3 border-t border-line pt-5 sm:flex-row sm:items-center">
-            <p className="text-xs text-muted">
-              {resultado === 'agendo'
-                ? 'Quedará como recuperado en los indicadores.'
-                : resultado === 'no_interesa'
-                  ? 'Sale de la lista y se guarda el motivo.'
-                  : resultado && sigPaso
-                    ? `Volverá a aparecer el ${fechaCorta(sumarDias(p.fechaEvento, sigPaso))} (día ${sigPaso}).`
-                    : resultado
-                      ? 'Era el rescate del día 15: pasa a campañas.'
-                      : `${p.fallosSeguidos} citas seguidas sin asistir · ${p.fallosHistoricos} en todo su historial.`}
-            </p>
-            <button disabled={!resultado} onClick={() => resultado && onGuardar(p, resultado, texto, motivo, nota)} className={btnNegro}>
-              Guardar y seguir
-            </button>
-          </div>
-        </section>
+          )}
+        </Paso>
       </div>
+
+      {/* pie fijo: lo que va a pasar y guardar */}
+      <footer className="sticky bottom-0 flex flex-col-reverse gap-3 border-t border-line bg-paper/95 p-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-7">
+        <p className="text-xs text-muted" aria-live="polite">
+          {consecuencia}
+        </p>
+        <button disabled={!resultado} onClick={() => resultado && onGuardar(p, resultado, texto, motivo, nota)} className={`${btnNegro} shrink-0`}>
+          Guardar y seguir
+        </button>
+      </footer>
     </Modal>
+  );
+}
+
+// los tres intentos del 3-7-15 en miniatura: hecho, toca ahora o pendiente
+function Pasos({ p, paso }: { p: Paciente; paso: number | null }) {
+  return (
+    <ol className="flex items-center gap-1.5" aria-label="Regla 3-7-15">
+      {PASOS.map((d) => {
+        const c = p.contactos.find((x) => x.paso === d);
+        const actual = d === paso;
+        const estado = c ? RESULTADO_TXT[c.resultado] : actual ? 'toca ahora' : d < (paso ?? 0) ? 'se pasó' : fechaCorta(sumarDias(p.fechaEvento, d));
+        return (
+          <li
+            key={d}
+            title={`Día ${d}: ${estado}`}
+            aria-label={`Día ${d}: ${estado}`}
+            className={`grid size-8 place-items-center rounded-full text-[11px] font-bold ${
+              c ? 'bg-ink text-white' : actual ? 'iris text-ink ring-2 ring-white' : 'bg-white text-muted ring-1 ring-line'
+            }`}
+          >
+            {c ? <Check className="size-3.5" aria-hidden /> : d}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
 function Dato({ k, v }: { k: string; v: string }) {
   return (
-    <div>
-      <dt className="text-[11px] uppercase tracking-[.14em] text-white/65">{k}</dt>
-      <dd className="mt-0.5 break-words text-white/90">{v}</dd>
+    <div className="flex justify-between gap-3 border-b border-line/70 py-1.5 sm:block sm:border-0 sm:py-0">
+      <dt className="text-xs text-muted">{k}</dt>
+      <dd className="break-words text-right text-sm font-medium sm:text-left">{v}</dd>
     </div>
   );
 }
 
 function Paso({ n, titulo, hecho, children }: { n: number; titulo: string; hecho: boolean; children: ReactNode }) {
   return (
-    <div className="mt-6">
+    <section>
       <h3 className="mb-3 flex items-center gap-2.5 text-base font-semibold">
         <span className={`grid size-6 place-items-center rounded-full text-xs font-bold ${hecho ? 'bg-verde text-white' : 'bg-ink text-white'}`}>
-          {hecho ? <Check className="size-3.5" /> : n}
+          {hecho ? <Check className="size-3.5" aria-hidden /> : n}
         </span>
         {titulo}
       </h3>
       {children}
-    </div>
+    </section>
   );
 }

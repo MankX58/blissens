@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "auth": "tsx --env-file-if-exists=.env auth/servidor.ts",
+    "api": "cd ../blissens-backend && .venv\\Scripts\\uvicorn.exe app.main:app --reload --port 8000",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

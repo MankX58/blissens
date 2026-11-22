@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { Estado, Paciente } from '../types';
-import { ESTADO_TXT, SEGMENTO_TXT, altoValor, fechaCorta, riesgoAlto, type Semaforo } from '../lib/reglas';
+import { ESTADO_TXT, esVIP, fechaCorta, riesgoAlto, type Semaforo } from '../lib/reglas';
 
 export const SEMAFORO_TXT: Record<Semaforo, string> = {
   rojo: 'Urgente',
@@ -28,25 +28,16 @@ export function Etiqueta({ children, tono = 'claro' }: { children: ReactNode; to
 // ---------- insignias del paciente ----------
 // Solo dos cosas se muestran como insignia: VIP (degradado) y riesgo alto. El resto va en la línea de datos (Meta).
 
-const motivoVIP = (p: Paciente) => {
-  const r = p.etiquetas.filter((e) => e !== 'VIP');
-  return r.length ? `VIP por ${r.join(', ').toLowerCase()}` : 'VIP: plan de alto valor';
-};
+const motivoVIP = (p: Paciente) => `VIP: ${p.motivoVip ?? 'tratamiento de alto valor'}`;
 
 export const textoRiesgo = (p: Paciente) =>
   `${p.fallosSeguidos} ${p.fallosSeguidos === 1 ? 'cita seguida' : 'citas seguidas'} sin asistir desde ${p.ultimaAtendida ? `su última visita (${fechaCorta(p.ultimaAtendida)})` : 'que llegó (nunca ha asistido)'} · ${p.fallosHistoricos} en todo su historial`;
 
 export function InsigniaVIP({ p }: { p: Paciente }) {
-  if (p.segmento !== 'local')
-    return (
-      <span className="iris inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-ink" title={motivoVIP(p)}>
-        {SEGMENTO_TXT[p.segmento]}
-      </span>
-    );
-  if (!p.etiquetas.includes('VIP') && !altoValor(p)) return null;
+  if (!esVIP(p)) return null;
   return (
-    <span className="iris inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-ink" title={motivoVIP(p)}>
-      VIP
+    <span className="iris inline-flex cursor-help items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-ink" title={motivoVIP(p)}>
+      VIP<span className="sr-only">: {p.motivoVip}</span>
     </span>
   );
 }
@@ -91,22 +82,46 @@ export function Meta({ p, doctor = true, oscuro = false, className = '' }: { p: 
   );
 }
 
-// Qué cuenta como fallo (se abre al hacer clic, sin ventanas emergentes)
-export function QueEsFallo({ className = '' }: { className?: string }) {
+// Cómo se prioriza: la misma explicación en todas las pantallas (se abre al hacer clic)
+export function ComoSePrioriza({ className = '' }: { className?: string }) {
   return (
     <details className={`group text-xs ${className}`}>
-      <summary className="cursor-pointer list-none font-semibold text-ink/70 underline decoration-dotted underline-offset-2 hover:text-ink">¿Qué cuenta como fallo?</summary>
-      <div className="hoja mt-2 space-y-1.5 rounded-2xl bg-soft p-3 leading-relaxed text-ink/80">
-        <p>
-          <b>Fallo</b> es una cita que no se cumplió: <i>Cambio de fecha, Anulado, Anulado por WhatsApp, No asiste</i> o <i>No confirmado</i>.
-        </p>
-        <p>
-          El <b>riesgo</b> se calcula con los fallos <b>seguidos desde la última vez que asistió</b>. Si un paciente falló, volvió y siguió viniendo, esos fallos
-          viejos ya no suben su riesgo: quedan solo como historial.
-        </p>
-        <p>
-          <b>Alto:</b> 3 o más seguidas sin asistir (doble confirmación 24 h antes). <b>Medio:</b> 1 o 2 seguidas, o reprograma mucho (3+ en total) aunque sí viene.
-        </p>
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 font-semibold text-ink/70 hover:text-ink [&::-webkit-details-marker]:hidden">
+        <span className="underline decoration-dotted underline-offset-2">¿Cómo se prioriza?</span>
+      </summary>
+      <div className="hoja mt-2 grid gap-4 rounded-2xl bg-soft p-4 leading-relaxed text-ink/80 sm:grid-cols-3">
+        <div>
+          <p className="font-semibold text-ink">1. Urgencia: cuándo contactar</p>
+          <ul className="mt-1.5 space-y-1">
+            <li className="flex gap-2"><Punto color="rojo" className="mt-1" /> <span><b>Urgente:</b> canceló o faltó hace 0 a 3 días, o es VIP, o tiene riesgo alto.</span></li>
+            <li className="flex gap-2"><Punto color="amarillo" className="mt-1" /> <span><b>Seguimiento:</b> 4 a 14 días (mensaje del día 7).</span></li>
+            <li className="flex gap-2"><Punto color="verde" className="mt-1" /> <span><b>Rescate:</b> 15 días o más, o control de limpieza.</span></li>
+          </ul>
+        </div>
+        <div>
+          <p className="font-semibold text-ink">
+            2. <span className="iris rounded-full px-1.5 py-px text-[10px] text-ink">VIP</span>: cuánto vale para la clínica
+          </p>
+          <p className="mt-1.5">Es VIP si cumple al menos uno:</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            <li>paciente internacional (o valoración virtual),</li>
+            <li>deportista de alto nivel,</li>
+            <li>tratamiento de alto valor: implantes, rehabilitación oral, coronas, carillas o diseño de sonrisa, alineadores,</li>
+            <li>plan estimado de $10 M o más.</li>
+          </ul>
+          <p className="mt-1">El motivo aparece en la ficha de cada paciente.</p>
+        </div>
+        <div>
+          <p className="font-semibold text-ink">
+            3. <span className="rounded-full bg-rojo/[.08] px-1.5 py-px text-[10px] text-rojo ring-1 ring-rojo/25">Riesgo alto</span>: puede volver a faltar
+          </p>
+          <p className="mt-1.5">
+            3 o más citas seguidas sin cumplir <b>desde la última vez que asistió</b> (Cambio de fecha, Anulado, Anulado por WhatsApp, No asiste o No confirmado). Pide doble
+            confirmación 24 h antes.
+          </p>
+          <p className="mt-2 font-semibold text-ink">Orden de las listas</p>
+          <p>Urgencia → VIP → riesgo alto → valor del tratamiento.</p>
+        </div>
       </div>
     </details>
   );

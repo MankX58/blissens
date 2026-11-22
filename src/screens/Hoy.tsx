@@ -4,7 +4,7 @@ import type { Paciente } from '../types';
 import {
   CASO_TXT,
   RESULTADO_TXT,
-  altoValor,
+  esVIP,
   diasDeRetraso,
   diasEntre,
   fechaCorta,
@@ -17,7 +17,7 @@ import {
   tocaHoy,
   type Semaforo,
 } from '../lib/reglas';
-import { Cifra, Etiqueta, Iniciales, Insignias, Meta, Punto, QueEsFallo, SEMAFORO_TXT, Vacio, btnBorde, btnNegro } from '../components/ui';
+import { Cifra, Etiqueta, Iniciales, Insignias, Meta, Punto, ComoSePrioriza, SEMAFORO_TXT, Vacio, btnBorde, btnNegro } from '../components/ui';
 
 type Filtro = 'todos' | Semaforo | 'alto' | 'riesgo' | 'Nuevo' | 'Antiguo' | 'sincel';
 type Orden = 'prioridad' | 'valor' | 'fallos' | 'antiguedad';
@@ -71,7 +71,7 @@ export function Hoy({
       const ok =
         filtro === 'todos' ||
         (filtro === 'alto'
-          ? altoValor(p)
+          ? esVIP(p)
           : filtro === 'riesgo'
             ? riesgoAlto(p)
             : filtro === 'Nuevo' || filtro === 'Antiguo'
@@ -96,22 +96,22 @@ export function Hoy({
 
   return (
     <>
-      <section className="entrar relative overflow-hidden rounded-[32px] bg-ink px-6 py-8 text-white sm:px-10 sm:py-11">
+      <section className="entrar relative overflow-hidden rounded-[28px] bg-ink px-6 py-6 text-white sm:px-8 sm:py-7">
         <div className="aura iris pointer-events-none absolute -right-24 -top-32 size-[420px] rounded-full opacity-35 blur-3xl" />
         <div className="relative">
           <p className="text-sm text-white/65">{fechaLarga}</p>
-          <h1 className="mt-3 text-4xl font-bold leading-[1.02] tracking-tight sm:text-[64px]">
+          <h1 className="mt-2 text-[30px] font-bold leading-[1.08] tracking-tight sm:text-[40px]">
             {delDia.length === 0 ? (
               <>Lista del día al día.</>
             ) : (
               <>
                 Hoy toca contactar
-                <br />a <span className="iris-text">{delDia.length}</span> {delDia.length === 1 ? 'paciente' : 'pacientes'}
+                 a <span className="iris-text">{delDia.length}</span> {delDia.length === 1 ? 'paciente' : 'pacientes'}
               </>
             )}
           </h1>
 
-          <div className="mt-8 max-w-2xl">
+          <div className="mt-5 max-w-2xl">
             <div>
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/60">
                 <span>
@@ -165,7 +165,7 @@ export function Hoy({
               );
             })}
           </div>
-          <QueEsFallo className="mt-3" />
+          <ComoSePrioriza className="mt-3" />
         </div>
       )}
 
@@ -177,7 +177,7 @@ export function Hoy({
                 [
                   ['todos', `Todos · ${delDia.length}`],
                   ['riesgo', `Riesgo alto · ${n(riesgoAlto)}`],
-                  ['alto', `VIP / alto valor · ${n(altoValor)}`],
+                  ['alto', `VIP · ${n(esVIP)}`],
                   ['Nuevo', `Nuevos · ${n((p) => p.antiguedad === 'Nuevo')}`],
                   ['Antiguo', `Antiguos · ${n((p) => p.antiguedad === 'Antiguo')}`],
                   ['sincel', `Sin celular · ${n((p) => !p.telefono)}`],

@@ -12,13 +12,33 @@ CREATE TABLE acciones_arancel (
 	uco FLOAT NOT NULL, 
 	precio_cop INTEGER NOT NULL, 
 	nombre_arancel VARCHAR(80) NOT NULL, 
-	habilitado BOOLEAN NOT NULL, id_categoria INTEGER REFERENCES categorias_arancel (id_categoria), id_arancel INTEGER REFERENCES aranceles (id_arancel), 
-	PRIMARY KEY (id_accion)
+	habilitado BOOLEAN NOT NULL, 
+	id_categoria INTEGER, 
+	id_arancel INTEGER, 
+	PRIMARY KEY (id_accion), 
+	FOREIGN KEY(id_categoria) REFERENCES categorias_arancel (id_categoria), 
+	FOREIGN KEY(id_arancel) REFERENCES aranceles (id_arancel)
 );
 
-CREATE TABLE "account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null);
+CREATE TABLE account (
+	id VARCHAR NOT NULL, 
+	"accountId" TEXT NOT NULL, 
+	"providerId" TEXT NOT NULL, 
+	"userId" VARCHAR NOT NULL, 
+	"accessToken" TEXT, 
+	"refreshToken" TEXT, 
+	"idToken" TEXT, 
+	"accessTokenExpiresAt" TEXT, 
+	"refreshTokenExpiresAt" TEXT, 
+	scope TEXT, 
+	password TEXT, 
+	"createdAt" TEXT NOT NULL, 
+	"updatedAt" TEXT NOT NULL, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY("userId") REFERENCES user (id) ON DELETE CASCADE
+);
 
-CREATE TABLE "agenda_libre" (
+CREATE TABLE agenda_libre (
 	id INTEGER NOT NULL, 
 	fecha DATE NOT NULL, 
 	hora VARCHAR(10) NOT NULL, 
@@ -28,23 +48,34 @@ CREATE TABLE "agenda_libre" (
 	ocupado_por INTEGER, 
 	asignado_el DATE, 
 	estado_previo VARCHAR(30), 
-	asistencia VARCHAR(20), confirmado_el DATE, id_profesional INTEGER REFERENCES profesionales (id_profesional), id_sillon INTEGER REFERENCES sillones (id_sillon), asignado_por TEXT REFERENCES user (id) ON DELETE SET NULL, 
+	asistencia VARCHAR(20), 
+	confirmado_el DATE, 
+	id_profesional INTEGER, 
+	id_sillon INTEGER, 
+	asignado_por VARCHAR, 
 	PRIMARY KEY (id), 
-	FOREIGN KEY(ocupado_por) REFERENCES pacientes (numero_paciente) ON DELETE SET NULL
+	FOREIGN KEY(ocupado_por) REFERENCES pacientes (numero_paciente) ON DELETE SET NULL, 
+	FOREIGN KEY(id_profesional) REFERENCES profesionales (id_profesional), 
+	FOREIGN KEY(id_sillon) REFERENCES sillones (id_sillon), 
+	FOREIGN KEY(asignado_por) REFERENCES user (id) ON DELETE SET NULL
 );
 
 CREATE TABLE apoderados (
-    id_apoderado INTEGER NOT NULL PRIMARY KEY,
-    numero_identificacion VARCHAR(30) UNIQUE,
-    nombre_completo VARCHAR(200) NOT NULL,
-    telefono VARCHAR(30),
-    celular VARCHAR(30)
-  );
+	id_apoderado INTEGER NOT NULL, 
+	numero_identificacion VARCHAR(30), 
+	nombre_completo VARCHAR(200) NOT NULL, 
+	telefono VARCHAR(30), 
+	celular VARCHAR(30), 
+	PRIMARY KEY (id_apoderado), 
+	UNIQUE (numero_identificacion)
+);
 
 CREATE TABLE aranceles (
-    id_arancel INTEGER NOT NULL PRIMARY KEY,
-    nombre VARCHAR(80) NOT NULL UNIQUE
-  );
+	id_arancel INTEGER NOT NULL, 
+	nombre VARCHAR(80) NOT NULL, 
+	PRIMARY KEY (id_arancel), 
+	UNIQUE (nombre)
+);
 
 CREATE TABLE campanas (
 	id INTEGER NOT NULL, 
@@ -55,8 +86,10 @@ CREATE TABLE campanas (
 	inicio DATETIME NOT NULL, 
 	ritmo_seg INTEGER NOT NULL, 
 	canal VARCHAR(20) NOT NULL, 
-	estado VARCHAR(20) NOT NULL, registrado_por TEXT REFERENCES user (id) ON DELETE SET NULL, 
-	PRIMARY KEY (id)
+	estado VARCHAR(20) NOT NULL, 
+	registrado_por VARCHAR, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(registrado_por) REFERENCES user (id) ON DELETE SET NULL
 );
 
 CREATE TABLE cargas_excel (
@@ -68,14 +101,19 @@ CREATE TABLE cargas_excel (
 	citas_enriquecidas_octubre INTEGER NOT NULL, 
 	guiones_cargados INTEGER NOT NULL, 
 	acciones_arancel_cargadas INTEGER NOT NULL, 
-	estado VARCHAR(30) NOT NULL, fecha_corte DATE, registrado_por TEXT REFERENCES user (id) ON DELETE SET NULL, 
-	PRIMARY KEY (id)
+	estado VARCHAR(30) NOT NULL, 
+	fecha_corte DATE, 
+	registrado_por VARCHAR, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(registrado_por) REFERENCES user (id) ON DELETE SET NULL
 );
 
 CREATE TABLE categorias_arancel (
-    id_categoria INTEGER NOT NULL PRIMARY KEY,
-    nombre VARCHAR(150) NOT NULL UNIQUE
-  );
+	id_categoria INTEGER NOT NULL, 
+	nombre VARCHAR(150) NOT NULL, 
+	PRIMARY KEY (id_categoria), 
+	UNIQUE (nombre)
+);
 
 CREATE TABLE ciclos_seguimiento (
 	id INTEGER NOT NULL, 
@@ -90,11 +128,13 @@ CREATE TABLE ciclos_seguimiento (
 );
 
 CREATE TABLE cita_eventos (
-    numero_cita INTEGER NOT NULL REFERENCES citas (numero_cita) ON DELETE CASCADE,
-    id_evento INTEGER NOT NULL REFERENCES eventos_cita (id_evento),
-    activo BOOLEAN NOT NULL DEFAULT 1,
-    PRIMARY KEY (numero_cita, id_evento)
-  );
+	numero_cita INTEGER NOT NULL, 
+	id_evento INTEGER NOT NULL, 
+	activo BOOLEAN NOT NULL, 
+	PRIMARY KEY (numero_cita, id_evento), 
+	FOREIGN KEY(numero_cita) REFERENCES citas (numero_cita) ON DELETE CASCADE, 
+	FOREIGN KEY(id_evento) REFERENCES eventos_cita (id_evento)
+);
 
 CREATE TABLE citas (
 	numero_cita INTEGER NOT NULL, 
@@ -115,15 +155,28 @@ CREATE TABLE citas (
 	hora_fin VARCHAR(16), 
 	comentario_cita TEXT, 
 	sillon VARCHAR(50), 
-	tipo_paciente VARCHAR(80), id_profesional INTEGER REFERENCES profesionales (id_profesional), id_estado INTEGER REFERENCES estados_cita (id_estado), id_sucursal INTEGER REFERENCES sucursales (id_sucursal), id_sillon INTEGER REFERENCES sillones (id_sillon), id_usuario_agendo INTEGER REFERENCES usuarios_sistema (id_usuario), motivo_atencion TEXT, fecha_creacion_cita DATETIME, 
+	tipo_paciente VARCHAR(80), 
+	id_profesional INTEGER, 
+	id_estado INTEGER, 
+	id_sucursal INTEGER, 
+	id_sillon INTEGER, 
+	id_usuario_agendo INTEGER, 
+	motivo_atencion TEXT, 
+	fecha_creacion_cita DATETIME, 
 	PRIMARY KEY (numero_cita), 
-	FOREIGN KEY(numero_paciente) REFERENCES pacientes (numero_paciente) ON DELETE CASCADE
+	FOREIGN KEY(numero_paciente) REFERENCES pacientes (numero_paciente) ON DELETE CASCADE, 
+	FOREIGN KEY(id_profesional) REFERENCES profesionales (id_profesional), 
+	FOREIGN KEY(id_estado) REFERENCES estados_cita (id_estado), 
+	FOREIGN KEY(id_sucursal) REFERENCES sucursales (id_sucursal), 
+	FOREIGN KEY(id_sillon) REFERENCES sillones (id_sillon), 
+	FOREIGN KEY(id_usuario_agendo) REFERENCES usuarios_sistema (id_usuario)
 );
 
 CREATE TABLE configuracion (
-    clave VARCHAR(60) NOT NULL PRIMARY KEY,
-    valor TEXT NOT NULL
-  );
+	clave VARCHAR(60) NOT NULL, 
+	valor TEXT NOT NULL, 
+	PRIMARY KEY (clave)
+);
 
 CREATE TABLE contactos_seguimiento (
 	id INTEGER NOT NULL, 
@@ -134,9 +187,11 @@ CREATE TABLE contactos_seguimiento (
 	mensaje TEXT NOT NULL, 
 	motivo VARCHAR(30) NOT NULL, 
 	nota TEXT, 
-	cupo_id INTEGER, registrado_por TEXT REFERENCES user (id) ON DELETE SET NULL, 
+	cupo_id INTEGER, 
+	registrado_por VARCHAR, 
 	PRIMARY KEY (id), 
-	FOREIGN KEY(numero_paciente) REFERENCES pacientes (numero_paciente) ON DELETE CASCADE
+	FOREIGN KEY(numero_paciente) REFERENCES pacientes (numero_paciente) ON DELETE CASCADE, 
+	FOREIGN KEY(registrado_por) REFERENCES user (id) ON DELETE SET NULL
 );
 
 CREATE TABLE envios_campana (
@@ -155,33 +210,39 @@ CREATE TABLE envios_campana (
 );
 
 CREATE TABLE especialidades (
-    id_especialidad INTEGER NOT NULL PRIMARY KEY,
-    codigo VARCHAR(10) NOT NULL UNIQUE,
-    descripcion VARCHAR(120)
-  );
+	id_especialidad INTEGER NOT NULL, 
+	codigo VARCHAR(10) NOT NULL, 
+	descripcion VARCHAR(120), 
+	PRIMARY KEY (id_especialidad), 
+	UNIQUE (codigo)
+);
 
 CREATE TABLE estados_cita (
-    id_estado INTEGER NOT NULL PRIMARY KEY,
-    nombre VARCHAR(80) NOT NULL UNIQUE,                     -- igual que citas.estado_actual
-    es_atendida BOOLEAN NOT NULL DEFAULT 0,
-    es_friccion BOOLEAN NOT NULL DEFAULT 0,                 -- 6 estados: deja al paciente "sin reagendar" (segmentación)
-    es_friccion_kpi BOOLEAN NOT NULL DEFAULT 0,             -- 4 estados: tasa de fricción del SRS (52,1 %)
-    cuenta_como_fallo BOOLEAN NOT NULL DEFAULT 0,           -- 5 estados: suman al riesgo
-    es_confirmacion BOOLEAN NOT NULL DEFAULT 0              -- confirmada o notificada: paciente activo
-  );
+	id_estado INTEGER NOT NULL, 
+	nombre VARCHAR(80) NOT NULL, 
+	es_atendida BOOLEAN NOT NULL, 
+	es_friccion BOOLEAN NOT NULL, 
+	es_friccion_kpi BOOLEAN NOT NULL, 
+	cuenta_como_fallo BOOLEAN NOT NULL, 
+	es_confirmacion BOOLEAN NOT NULL, 
+	PRIMARY KEY (id_estado), 
+	UNIQUE (nombre)
+);
 
 CREATE TABLE etiquetas_paciente (
-    numero_paciente INTEGER NOT NULL,
-    etiqueta VARCHAR(40) NOT NULL,
-    PRIMARY KEY (numero_paciente, etiqueta),
-    FOREIGN KEY (numero_paciente) REFERENCES pacientes (numero_paciente) ON DELETE CASCADE
-  );
+	numero_paciente INTEGER NOT NULL, 
+	etiqueta VARCHAR(40) NOT NULL, 
+	PRIMARY KEY (numero_paciente, etiqueta), 
+	FOREIGN KEY(numero_paciente) REFERENCES pacientes (numero_paciente) ON DELETE CASCADE
+);
 
 CREATE TABLE eventos_cita (
-    id_evento INTEGER NOT NULL PRIMARY KEY,
-    codigo VARCHAR(60) NOT NULL UNIQUE,
-    descripcion VARCHAR(120) NOT NULL                       -- columna Sí/No del Excel "Agenda citas y estados"
-  );
+	id_evento INTEGER NOT NULL, 
+	codigo VARCHAR(60) NOT NULL, 
+	descripcion VARCHAR(120) NOT NULL, 
+	PRIMARY KEY (id_evento), 
+	UNIQUE (codigo)
+);
 
 CREATE TABLE guiones (
 	id INTEGER NOT NULL, 
@@ -198,19 +259,24 @@ CREATE TABLE notas_paciente (
 	id INTEGER NOT NULL, 
 	numero_paciente INTEGER NOT NULL, 
 	fecha DATE NOT NULL, 
-	texto TEXT NOT NULL, registrado_por TEXT REFERENCES user (id) ON DELETE SET NULL, 
+	texto TEXT NOT NULL, 
+	registrado_por VARCHAR, 
 	PRIMARY KEY (id), 
-	FOREIGN KEY(numero_paciente) REFERENCES pacientes (numero_paciente) ON DELETE CASCADE
+	FOREIGN KEY(numero_paciente) REFERENCES pacientes (numero_paciente) ON DELETE CASCADE, 
+	FOREIGN KEY(registrado_por) REFERENCES user (id) ON DELETE SET NULL
 );
 
-CREATE TABLE "ofertas_cupo" (
+CREATE TABLE ofertas_cupo (
 	id INTEGER NOT NULL, 
 	cupo_id INTEGER NOT NULL, 
 	numero_paciente INTEGER NOT NULL, 
-	fecha DATE NOT NULL, rechazo BOOLEAN NOT NULL DEFAULT 0, registrado_por TEXT REFERENCES user (id) ON DELETE SET NULL, 
+	fecha DATE NOT NULL, 
+	rechazo BOOLEAN NOT NULL, 
+	registrado_por VARCHAR, 
 	PRIMARY KEY (id), 
-	FOREIGN KEY(cupo_id) REFERENCES "agenda_libre" (id) ON DELETE CASCADE, 
-	FOREIGN KEY(numero_paciente) REFERENCES pacientes (numero_paciente) ON DELETE CASCADE
+	FOREIGN KEY(cupo_id) REFERENCES agenda_libre (id) ON DELETE CASCADE, 
+	FOREIGN KEY(numero_paciente) REFERENCES pacientes (numero_paciente) ON DELETE CASCADE, 
+	FOREIGN KEY(registrado_por) REFERENCES user (id) ON DELETE SET NULL
 );
 
 CREATE TABLE pacientes (
@@ -230,6 +296,7 @@ CREATE TABLE pacientes (
 	tipo_paciente VARCHAR(80), 
 	telefono_normalizado VARCHAR(30), 
 	email VARCHAR(180), 
+	apoderado VARCHAR(200), 
 	tiene_ficha_contacto BOOLEAN NOT NULL, 
 	sin_celular BOOLEAN NOT NULL, 
 	estado_contacto VARCHAR(40) NOT NULL, 
@@ -237,6 +304,8 @@ CREATE TABLE pacientes (
 	tratamientos_atendidos INTEGER NOT NULL, 
 	diagnosticos_atendidos INTEGER NOT NULL, 
 	fallos_historicos INTEGER NOT NULL, 
+	fallos_seguidos INTEGER NOT NULL, 
+	ultima_atendida DATE, 
 	score_riesgo INTEGER NOT NULL, 
 	nivel_riesgo VARCHAR(20) NOT NULL, 
 	requiere_doble_confirmacion BOOLEAN NOT NULL, 
@@ -244,6 +313,7 @@ CREATE TABLE pacientes (
 	es_control_limpieza BOOLEAN NOT NULL, 
 	pausa_mayor_30_dias BOOLEAN NOT NULL, 
 	dias_desde_evento INTEGER NOT NULL, 
+	fecha_evento DATE, 
 	semaforo VARCHAR(20), 
 	paso_protocolo_actual INTEGER, 
 	fecha_proximo_contacto DATE, 
@@ -253,60 +323,128 @@ CREATE TABLE pacientes (
 	accion_arancel_referencia VARCHAR(200), 
 	recuperado_el DATE, 
 	origen VARCHAR(20) NOT NULL, 
-	creado_el DATE NOT NULL, fallos_seguidos INTEGER NOT NULL DEFAULT 0, ultima_atendida DATE, apoderado VARCHAR(200), nombres VARCHAR(100), apellidos VARCHAR(100), numero_identificacion VARCHAR(30), numero_interno VARCHAR(30), fecha_nacimiento DATE, telefono_secundario VARCHAR(30), convenio_paciente VARCHAR(80), observaciones_medicas TEXT, habilitado BOOLEAN NOT NULL DEFAULT 1, id_apoderado INTEGER REFERENCES apoderados (id_apoderado) ON DELETE SET NULL, total_citas INTEGER NOT NULL DEFAULT 0, total_atendidas INTEGER NOT NULL DEFAULT 0, numero_ultima_cita INTEGER REFERENCES citas (numero_cita) ON DELETE SET NULL, 
-	PRIMARY KEY (numero_paciente)
+	creado_el DATE NOT NULL, 
+	nombres VARCHAR(100), 
+	apellidos VARCHAR(100), 
+	numero_identificacion VARCHAR(30), 
+	numero_interno VARCHAR(30), 
+	fecha_nacimiento DATE, 
+	telefono_secundario VARCHAR(30), 
+	convenio_paciente VARCHAR(80), 
+	observaciones_medicas TEXT, 
+	habilitado BOOLEAN NOT NULL, 
+	id_apoderado INTEGER, 
+	total_citas INTEGER NOT NULL, 
+	total_atendidas INTEGER NOT NULL, 
+	numero_ultima_cita INTEGER, "motivo_vip" VARCHAR(80), 
+	PRIMARY KEY (numero_paciente), 
+	FOREIGN KEY(id_apoderado) REFERENCES apoderados (id_apoderado) ON DELETE SET NULL
 );
 
 CREATE TABLE profesionales (
-    id_profesional INTEGER NOT NULL PRIMARY KEY,
-    nombre_mostrar VARCHAR(120) NOT NULL UNIQUE,            -- igual que citas.profesional / pacientes.profesional_principal
-    nombres VARCHAR(80) NOT NULL,
-    apellidos VARCHAR(80) NOT NULL,
-    id_especialidad INTEGER NOT NULL REFERENCES especialidades (id_especialidad),
-    activo BOOLEAN NOT NULL DEFAULT 1
-  );
+	id_profesional INTEGER NOT NULL, 
+	nombre_mostrar VARCHAR(120) NOT NULL, 
+	nombres VARCHAR(80) NOT NULL, 
+	apellidos VARCHAR(80) NOT NULL, 
+	id_especialidad INTEGER NOT NULL, 
+	activo BOOLEAN NOT NULL, 
+	PRIMARY KEY (id_profesional), 
+	UNIQUE (nombre_mostrar), 
+	FOREIGN KEY(id_especialidad) REFERENCES especialidades (id_especialidad)
+);
 
-CREATE TABLE "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade, "impersonatedBy" text);
+CREATE TABLE session (
+	id VARCHAR NOT NULL, 
+	"expiresAt" TEXT NOT NULL, 
+	token VARCHAR NOT NULL, 
+	"createdAt" TEXT NOT NULL, 
+	"updatedAt" TEXT NOT NULL, 
+	"ipAddress" TEXT, 
+	"userAgent" TEXT, 
+	"userId" VARCHAR NOT NULL, 
+	"impersonatedBy" TEXT, 
+	PRIMARY KEY (id), 
+	UNIQUE (token), 
+	FOREIGN KEY("userId") REFERENCES user (id) ON DELETE CASCADE
+);
 
 CREATE TABLE sillones (
-    id_sillon INTEGER NOT NULL PRIMARY KEY,
-    id_sucursal INTEGER NOT NULL REFERENCES sucursales (id_sucursal),
-    nombre VARCHAR(50) NOT NULL,
-    activo BOOLEAN NOT NULL DEFAULT 1,
-    UNIQUE (id_sucursal, nombre)
-  );
+	id_sillon INTEGER NOT NULL, 
+	id_sucursal INTEGER NOT NULL, 
+	nombre VARCHAR(50) NOT NULL, 
+	activo BOOLEAN NOT NULL, 
+	PRIMARY KEY (id_sillon), 
+	UNIQUE (id_sucursal, nombre), 
+	FOREIGN KEY(id_sucursal) REFERENCES sucursales (id_sucursal)
+);
 
 CREATE TABLE sucursales (
-    id_sucursal INTEGER NOT NULL PRIMARY KEY,
-    nombre VARCHAR(80) NOT NULL UNIQUE,
-    direccion VARCHAR(200)
-  );
+	id_sucursal INTEGER NOT NULL, 
+	nombre VARCHAR(80) NOT NULL, 
+	direccion VARCHAR(200), 
+	PRIMARY KEY (id_sucursal), 
+	UNIQUE (nombre)
+);
 
 CREATE TABLE tratamientos (
-    numero_tratamiento INTEGER NOT NULL PRIMARY KEY,        -- # Tratamiento del software (citas.numero_tratamiento)
-    numero_paciente INTEGER NOT NULL REFERENCES pacientes (numero_paciente) ON DELETE CASCADE,
-    id_especialidad INTEGER NOT NULL REFERENCES especialidades (id_especialidad),
-    tipo_atencion VARCHAR(20) NOT NULL CHECK (tipo_atencion IN ('Diagnóstico', 'Tratamiento')),
-    convenio_tratamiento VARCHAR(80),
-    fecha_generacion DATE
-  );
+	numero_tratamiento INTEGER NOT NULL, 
+	numero_paciente INTEGER NOT NULL, 
+	id_especialidad INTEGER NOT NULL, 
+	tipo_atencion VARCHAR(20) NOT NULL, 
+	convenio_tratamiento VARCHAR(80), 
+	fecha_generacion DATE, 
+	PRIMARY KEY (numero_tratamiento), 
+	FOREIGN KEY(numero_paciente) REFERENCES pacientes (numero_paciente) ON DELETE CASCADE, 
+	FOREIGN KEY(id_especialidad) REFERENCES especialidades (id_especialidad)
+);
 
-CREATE TABLE "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null, "role" text, "banned" integer, "banReason" text, "banExpires" date);
+CREATE TABLE user (
+	id VARCHAR NOT NULL, 
+	name TEXT NOT NULL, 
+	email VARCHAR NOT NULL, 
+	"emailVerified" INTEGER NOT NULL, 
+	image TEXT, 
+	"createdAt" TEXT NOT NULL, 
+	"updatedAt" TEXT NOT NULL, 
+	role TEXT, 
+	banned INTEGER, 
+	"banReason" TEXT, 
+	"banExpires" TEXT, 
+	profesional TEXT, 
+	PRIMARY KEY (id), 
+	UNIQUE (email)
+);
 
 CREATE TABLE usuarios_sistema (
-    id_usuario INTEGER NOT NULL PRIMARY KEY,
-    nombre_usuario VARCHAR(80) NOT NULL UNIQUE
-  );
+	id_usuario INTEGER NOT NULL, 
+	nombre_usuario VARCHAR(80) NOT NULL, 
+	PRIMARY KEY (id_usuario), 
+	UNIQUE (nombre_usuario)
+);
 
-CREATE TABLE "verification" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expiresAt" date not null, "createdAt" date not null, "updatedAt" date not null);
-
-CREATE INDEX "account_userId_idx" on "account" ("userId");
+CREATE TABLE verification (
+	id VARCHAR NOT NULL, 
+	identifier TEXT NOT NULL, 
+	value TEXT NOT NULL, 
+	"expiresAt" TEXT NOT NULL, 
+	"createdAt" TEXT NOT NULL, 
+	"updatedAt" TEXT NOT NULL, 
+	PRIMARY KEY (id)
+);
 
 CREATE INDEX ix_acciones_arancel_categoria ON acciones_arancel (categoria);
 
 CREATE INDEX ix_acciones_arancel_habilitado ON acciones_arancel (habilitado);
 
 CREATE INDEX ix_acciones_arancel_nombre_accion ON acciones_arancel (nombre_accion);
+
+CREATE INDEX "ix_account_userId" ON account ("userId");
+
+CREATE INDEX ix_agenda_libre_fecha ON agenda_libre (fecha);
+
+CREATE INDEX ix_agenda_libre_ocupado_por ON agenda_libre (ocupado_por);
+
+CREATE INDEX ix_agenda_libre_profesional ON agenda_libre (profesional);
 
 CREATE INDEX ix_campanas_estado ON campanas (estado);
 
@@ -340,17 +478,11 @@ CREATE INDEX ix_guiones_categoria ON guiones (categoria);
 
 CREATE UNIQUE INDEX ix_guiones_fila_excel ON guiones (fila_excel);
 
-CREATE INDEX ix_huecos_agenda_fecha ON "agenda_libre" (fecha);
-
-CREATE INDEX ix_huecos_agenda_ocupado_por ON "agenda_libre" (ocupado_por);
-
-CREATE INDEX ix_huecos_agenda_profesional ON "agenda_libre" (profesional);
-
 CREATE INDEX ix_notas_paciente_numero_paciente ON notas_paciente (numero_paciente);
 
-CREATE INDEX ix_ofertas_hueco_hueco_id ON "ofertas_cupo" (cupo_id);
+CREATE INDEX ix_ofertas_cupo_cupo_id ON ofertas_cupo (cupo_id);
 
-CREATE INDEX ix_ofertas_hueco_numero_paciente ON "ofertas_cupo" (numero_paciente);
+CREATE INDEX ix_ofertas_cupo_numero_paciente ON ofertas_cupo (numero_paciente);
 
 CREATE INDEX ix_pacientes_es_control_limpieza ON pacientes (es_control_limpieza);
 
@@ -372,6 +504,8 @@ CREATE INDEX ix_pacientes_semaforo ON pacientes (semaforo);
 
 CREATE INDEX ix_pacientes_toca_hoy ON pacientes (toca_hoy);
 
-CREATE INDEX "session_userId_idx" on "session" ("userId");
+CREATE INDEX "ix_session_userId" ON session ("userId");
 
-CREATE INDEX "verification_identifier_idx" on "verification" ("identifier");
+CREATE INDEX ix_tratamientos_numero_paciente ON tratamientos (numero_paciente);
+
+CREATE INDEX ix_verification_identifier ON verification (identifier);

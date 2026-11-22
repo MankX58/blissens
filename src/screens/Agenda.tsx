@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowRightLeft, Check, ChevronDown, Clock, MessageCircle, Phone, Plus, RotateCcw, Search, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
 import type { Hueco, Paciente, Profesional } from '../types';
 import { fechaLarga, guionHueco, horaLarga, oficial, rellenar, N_UBICACION } from '../lib/guiones';
-import { CASO_TXT, ESPECIALISTAS, ESTADO_TXT, altoValor, diasEntre, fechaCorta, linkWhatsApp, pesosCorto, riesgoAlto, sumarDias } from '../lib/reglas';
+import { CASO_TXT, ESPECIALISTAS, ESTADO_TXT, esVIP, diasEntre, fechaCorta, linkWhatsApp, pesosCorto, riesgoAlto, sumarDias } from '../lib/reglas';
 import { Encabezado, Etiqueta, Iniciales, InsigniaRiesgo, Insignias, Vacio, btnBorde, btnChico, btnNegro } from '../components/ui';
 
 // ---------- estado de cada cupo: dice qué hay que hacer con él ----------
-type EstadoEspacio = 'libre' | 'ofrecido' | 'asignado' | 'confirmar' | 'confirmado' | 'asistencia' | 'asistio' | 'no_asistio' | 'perdido';
+export type EstadoEspacio = 'libre' | 'ofrecido' | 'asignado' | 'confirmar' | 'confirmado' | 'asistencia' | 'asistio' | 'no_asistio' | 'perdido';
 
 const INFO: Record<EstadoEspacio, { t: string; cls: string }> = {
   libre: { t: 'Por llenar', cls: 'bg-rojo/10 text-rojo' },
@@ -20,7 +20,7 @@ const INFO: Record<EstadoEspacio, { t: string; cls: string }> = {
   perdido: { t: 'Se perdió', cls: 'bg-soft text-muted' },
 };
 
-function estadoDe(h: Hueco, hoy: string): EstadoEspacio {
+export function estadoDe(h: Hueco, hoy: string): EstadoEspacio {
   if (h.asistencia) return h.asistencia;
   if (h.ocupadoPor) {
     if (h.fecha <= hoy) return 'asistencia';
@@ -76,7 +76,7 @@ function candidatos(h: Hueco, pacientes: Paciente[], f: Filtros) {
     .sort((a, b) => {
       if (!!a.telefono !== !!b.telefono) return a.telefono ? -1 : 1;
       if ((a.especialista === h.especialista) !== (b.especialista === h.especialista)) return a.especialista === h.especialista ? -1 : 1;
-      if (altoValor(a) !== altoValor(b)) return altoValor(a) ? -1 : 1;
+      if (esVIP(a) !== esVIP(b)) return esVIP(a) ? -1 : 1;
       return b.valor - a.valor;
     });
 }

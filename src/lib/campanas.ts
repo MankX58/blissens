@@ -1,5 +1,4 @@
-import type { Campana, ConfigWA, Paciente } from '../types';
-import { soloDigitos } from './reglas';
+import type { Campana, Paciente } from '../types';
 
 export interface Audiencia {
   id: string;
@@ -52,9 +51,9 @@ export const AUDIENCIAS: Audiencia[] = [
   },
   {
     id: 'vip',
-    titulo: 'VIP y alto valor',
-    descripcion: 'Valoración virtual, rehabilitación o planes desde $10 M',
-    filtro: (p) => p.etiquetas.includes('VIP') || p.segmento !== 'local',
+    titulo: 'Pacientes VIP',
+    descripcion: 'Internacionales, deportistas y tratamientos de alto valor',
+    filtro: (p) => p.etiquetas.includes('VIP'),
     plantilla:
       'Hola, {nombre}. Te escribimos de parte de {especialista}. Queremos acompañarte de cerca para continuar {tratamiento}: podemos agendarte una cita en la clínica o, si te queda más fácil, una valoración virtual. ¿Qué opción prefieres?',
   },
@@ -106,8 +105,6 @@ export const personalizar = (plantilla: string, p: Paciente) =>
     .replaceAll(' de el Dr.', ' del Dr.')
     .replaceAll(' a el Dr.', ' al Dr.');
 
-export const apiConectada = (c: ConfigWA) => !!(c.token.trim() && c.phoneId.trim());
-
 // Qué tiene que hacer el motor con esta campaña ahora mismo
 export type Paso = { tipo: 'nada' } | { tipo: 'completar' } | { tipo: 'enviar'; idx: number };
 export function siguientePaso(c: Campana, ahora: number): Paso {
@@ -120,33 +117,7 @@ export function siguientePaso(c: Campana, ahora: number): Paso {
   return { tipo: 'enviar', idx };
 }
 
-// Envío real por WhatsApp Business Cloud API (Meta).
-// Fuera de la ventana de 24 h WhatsApp exige una plantilla aprobada; si hay una configurada se usa con {nombre} como variable.
-// ponytail: el token vive en el navegador; en producción debe ir en un servidor propio que haga esta llamada.
-export async function enviarPorAPI(cfg: ConfigWA, telefono: string, texto: string, nombre: string) {
-  const to = soloDigitos(telefono);
-  const body = cfg.plantilla.trim()
-    ? {
-        messaging_product: 'whatsapp',
-        to,
-        type: 'template',
-        template: {
-          name: cfg.plantilla.trim(),
-          language: { code: cfg.idioma || 'es' },
-          components: [{ type: 'body', parameters: [{ type: 'text', text: nombre.split(' ')[0] }] }],
-        },
-      }
-    : { messaging_product: 'whatsapp', to, type: 'text', text: { body: texto } };
-  const r = await fetch(`https://graph.facebook.com/v21.0/${cfg.phoneId.trim()}/messages`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${cfg.token.trim()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) {
-    const j = await r.json().catch(() => null);
-    throw new Error(j?.error?.message ?? `Error ${r.status}`);
-  }
-}
+// El envío real lo hace el backend (POST /campanas/{id}/ejecutar-lote); el token de WhatsApp vive en su .env.
 
 export const ESTADO_CAMPANA_TXT: Record<Campana['estado'], string> = {
   programada: 'Programada',

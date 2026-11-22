@@ -1,5 +1,5 @@
 // Inicio de sesión del panel (Better Auth). Corre en Node aparte del backend FastAPI y comparte backend/blissens.db:
-// FastAPI valida la misma cookie con backend/sesion.py.
+// FastAPI (../blissens-backend) valida la misma cookie en app/modules/auth/sesion_service.py.
 //
 //   npm run dev                                                     (desarrollo: Vite atiende /api/auth con este archivo)
 //   npm run auth                                                    (producción: servidor aparte en :4000)
@@ -19,6 +19,8 @@ export const auth = betterAuth({
   // la base la comparte con FastAPI: espera hasta 5 s si el otro proceso está escribiendo (la base está en modo WAL)
   database: new DatabaseSync('backend/blissens.db', { timeout: 5000 }),
   emailAndPassword: { enabled: true, disableSignUp: true },
+  // especialistas: qué agenda es la suya ('Dra. Sara López' | 'Dr. Juan Manuel Olarte'); solo gerencia lo asigna
+  user: { additionalFields: { profesional: { type: 'string', required: false, input: false } } },
   socialProviders: google
     ? { google: { clientId: process.env.GOOGLE_CLIENT_ID!, clientSecret: process.env.GOOGLE_CLIENT_SECRET!, disableImplicitSignUp: true, prompt: 'select_account' } }
     : {},

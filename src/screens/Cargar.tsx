@@ -5,7 +5,7 @@ import { GRUPO_TXT, pesosCorto } from '../lib/reglas';
 import type { Grupo } from '../types';
 import { Cifra, Encabezado, btnBorde, btnNegro } from '../components/ui';
 
-type Entrada = { nombre: string; filas: Record<string, unknown>[]; tipo: TipoArchivo };
+type Entrada = { nombre: string; filas: Record<string, unknown>[]; tipo: TipoArchivo; archivo: File };
 const ESPERADOS: TipoArchivo[] = ['historial', 'detalle', 'arancel', 'guiones'];
 const AYUDA: Record<TipoArchivo, string> = {
   historial: 'Todas las citas con su estado (Atendido, Anulado, Cambio de fecha, No asiste…). Base de la segmentación.',
@@ -15,13 +15,26 @@ const AYUDA: Record<TipoArchivo, string> = {
   desconocido: '',
 };
 
-export function Cargar({ onAgregar }: { onAgregar: (c: Carga) => void }) {
+type Archivos = { historial: File; detalle?: File; arancel?: File; guiones?: File };
+
+// Vista previa en el navegador; al confirmar, los archivos van al ETL del backend, que conserva lo trabajado
+export function Cargar({ onSubir }: { onSubir: (a: Archivos) => Promise<boolean> }) {
   const input = useRef<HTMLInputElement>(null);
   const [arrastrando, setArrastrando] = useState(false);
   const [leyendo, setLeyendo] = useState(false);
   const [error, setError] = useState('');
   const [entradas, setEntradas] = useState<Entrada[]>([]);
   const [res, setRes] = useState<Carga | null>(null);
+  const [subiendo, setSubiendo] = useState(false);
+  const archivo = (t: TipoArchivo) => entradas.find((e) => e.tipo === t)?.archivo;
+  const historial = archivo('historial');
+  const subir = async () => {
+    if (!historial) return;
+    setSubiendo(true);
+    const ok = await onSubir({ historial, detalle: archivo('detalle'), arancel: archivo('arancel'), guiones: archivo('guiones') });
+    setSubiendo(false);
+    if (ok) (setEntradas([]), setRes(null));
+  };
 
   const leer = async (files: FileList | File[]) => {
     setError('');
@@ -35,7 +48,7 @@ export function Cargar({ onAgregar }: { onAgregar: (c: Carga) => void }) {
           continue;
         }
         const filas = leerHoja(await f.arrayBuffer());
-        nuevas.push({ nombre: f.name, filas, tipo: tipoDe(filas) });
+        nuevas.push({ nombre: f.name, filas, tipo: tipoDe(filas), archivo: f });
       }
       // un archivo por tipo: el último que se sube reemplaza al anterior
       setEntradas((prev) => [...prev.filter((e) => !nuevas.some((n) => n.tipo === e.tipo && n.tipo !== 'desconocido')), ...nuevas]);
@@ -138,9 +151,12 @@ export function Cargar({ onAgregar }: { onAgregar: (c: Carga) => void }) {
                 {res.pacientes.length} pacientes únicos en {res.citas.length} citas
               </h2>
             </div>
-            <button onClick={() => onAgregar(res)} className={btnNegro}>
-              Usar estos datos
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              <button onClick={subir} disabled={!historial || subiendo} className={btnNegro}>
+                {subiendo ? 'Cargando en el servidor…' : 'Usar estos datos'}
+              </button>
+              {!historial && <span className="text-xs text-amarillo">Falta el archivo de agenda con estados.</span>}
+            </div>
           </div>
           {res.avisos.map((a) => (
             <p key={a} className="mt-3 rounded-xl bg-amarillo/10 px-4 py-2 text-sm text-amarillo">

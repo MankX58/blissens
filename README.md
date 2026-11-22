@@ -2,106 +2,94 @@
 
 Panel diario para la auxiliar administrativa de Blissens Odontología: lee la agenda exportada en Excel, detecta a los pacientes que se están perdiendo y arma la lista de contacto del día con la regla 3-7-15.
 
-## Secciones (agrupadas por rol)
+## Roles y secciones
 
-**Auxiliar administrativa**
-- **Hoy toca contactar**: lista del día por semáforo (rojo = último intento o atrasado, amarillo = día 7, verde = día 3) y valor. En *Contactar* se elige el guion, se abre WhatsApp con el mensaje listo y se registra la respuesta y el motivo.
-- **Pacientes**: expediente de cada paciente con su proceso 3-7-15, historia completa (contactos, campañas, citas, notas, procesos anteriores), notas internas, reactivar o sacar del seguimiento y alta manual.
-- **Cargar agenda**: lee el Excel del software; las cancelaciones futuras se convierten en cupos de la agenda libre. Si un paciente ya existía, su proceso anterior queda en el expediente.
+Cada persona entra a un **Inicio** propio: su foco del día, sus responsabilidades con su avance (cada tarjeta lleva a su sección), una lectura de sus datos y qué hace, ve y no ve su rol. Los roles salen del proceso real de la clínica y están definidos en `src/lib/roles.ts`.
 
-**Recepción y agenda**
-- **Agenda libre**: cupos disponibles con pacientes sugeridos (mismo especialista, alto valor primero), registro de a quién se le ofreció, asignaciones con opción de revertir y marcar asistencia. Si no asiste, el paciente vuelve solo a la regla 3-7-15.
+**Recepción y seguimiento** (auxiliar / recepcionista) · que ningún paciente quede sin reagendar ni ningún cupo vacío
+- **Hoy toca contactar**: lista del día por semáforo (rojo = 0 a 3 días, VIP o riesgo alto; amarillo = día 7; verde = día 15) y valor. En *Contactar* se elige el guion, se abre WhatsApp con el mensaje listo y se registran la respuesta y el motivo.
+- **Pacientes**: expediente con el proceso 3-7-15, historia completa (contactos, campañas, citas, notas, procesos anteriores), notas internas, reactivar o sacar del seguimiento y alta manual.
+- **Agenda libre**: cupos con pacientes sugeridos (mismo especialista, alto valor primero), ofertas, asignación con opción de revertir, confirmación 24 h antes y asistencia. Si no asiste, vuelve solo a la regla 3-7-15.
+- **Cargar agenda**: lee el Excel del software; las cancelaciones futuras se convierten en cupos de la agenda libre.
 
-**Campañas de reactivación**
-- **Campañas automáticas**: audiencia + mensaje con variables + envío ahora o programado, con pausa entre mensajes. Se envían solas mientras el panel está abierto, con avance en vivo, pausa, cancelación y reintento de fallidos. Sin conexión funcionan en modo simulación; con WhatsApp Business Cloud API (token + ID de número, opcionalmente una plantilla aprobada) salen de verdad.
+**Especialista** (Dra. Sara López, Dr. Juan Manuel Olarte) · que sus pacientes terminen el tratamiento
+- Ve **solo sus pacientes y sus cupos** (gerencia le asigna su agenda en *Cuentas*): tratamientos en pausa, diagnósticos sin iniciar, riesgo alto y a quién retomar primero. Deja notas para orientar a recepción.
 
-**Dirección y especialistas**
-- **Indicadores**: valor recuperado, cancelaciones, inasistencias, tasa de recuperación, actividad de 14 días, motivos, efectividad por intento, recuperación por segmento, agenda libre y campañas. Las tablas (seguimiento, pacientes, agenda libre, campañas) se ven en pantalla con búsqueda y orden, y se pueden descargar una a una o todas en un Excel.
+**Campañas de reactivación** · recuperar a quien el seguimiento diario no alcanzó
+- **Campañas**: audiencia por segmento (sin respuesta tras 3-7-15, diagnóstico sin tratamiento, pausa, FLAIRES…) + mensaje con variables + envío ahora o programado. Sin conexión, modo simulación; con WhatsApp Business Cloud API salen de verdad. No ve expedientes ni notas clínicas.
 
-## Inicio de sesión y roles
+**Gerencia** · decidir con datos
+- Inicio con KPIs (por recuperar, dinero detenido, recuperados, tasa de recuperación) y el avance de cada área. Entra a todas las secciones.
+- **Indicadores**: fricción, motivos, efectividad por intento, segmentos, agenda libre y campañas; tablas descargables en Excel.
+- **Cuentas**: crear cuentas, asignar rol (y agenda a especialistas), desactivar; cuadro de qué ve cada rol.
 
-Cada persona entra con su cuenta y ve solo las secciones de su rol; **dirección** ve todo y gestiona las cuentas en *Cuentas* (crear, cambiar rol, desactivar). No hay registro público: con Google solo entra quien ya tiene cuenta con ese correo.
+## Arquitectura
 
-| Pieza | Dónde | Qué hace |
-|---|---|---|
-| Better Auth (Node) | `auth/` | login con contraseña y con Google; guarda `user`, `session`, `account`, `verification` en `backend/blissens.db` |
-| Backend (FastAPI) | `backend/sesion.py` | valida la misma cookie: `Depends(usuario_actual)` o `Depends(requiere_rol("mercadeo"))` |
-| Panel (React) | `src/screens/Login.tsx`, `Cuentas.tsx` | en desarrollo Vite atiende `/api/auth` él mismo y pasa el resto de `/api` a FastAPI (:8000) |
-
-Los roles se definen una sola vez en `src/lib/roles.ts` (panel y Better Auth); `sesion.py` los recibe tal cual desde la base.
-
-```bash
-cp .env.example .env            # BETTER_AUTH_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
-npm run dev                      # panel + login en http://localhost:3000
-npm run auth                     # solo en producción: Better Auth aparte en :4000 (el proxy debe mandarle /api/auth)
-uvicorn main:app --port 8000     # (desde backend/) FastAPI
-npx tsx --env-file=.env auth/crear-admin.ts correo@dominio.com   # primera cuenta de dirección
+```text
+ESTUD-IA/
+├── blissens/                 este repo: panel (React + Vite) y login (Better Auth)
+│   ├── src/                  pantallas, reglas en pantalla y cliente del backend (src/lib/api.ts)
+│   ├── auth/                 Better Auth: contraseña y Google; cuentas, roles y agenda del especialista
+│   ├── backend/blissens.db   la base SQLite compartida (en .gitignore: datos de pacientes)
+│   └── docs/                 ESQUEMA.md (qué es cada campo) y esquema.sql (generado)
+├── blissens-backend/         FastAPI + pandas + openpyxl: ETL de los Excel, reglas, permisos y API REST
+└── Archivos Blissens Odontologia/   los 4 Excel de la clínica (RUTA_DATOS_EXCEL del backend)
 ```
 
-En Google Cloud Console (*APIs y servicios → Credenciales → ID de cliente OAuth, aplicación web*) el URI de redirección autorizado es `http://localhost:3000/api/auth/callback/google` (en producción, el dominio del panel). Si cambian las tablas de Better Auth (nuevos plugins): `npx @better-auth/cli@1.4.21 migrate --config auth/auth.ts -y`.
-
-## Datos reales
-
-Al abrir el panel por primera vez se leen los 4 Excel de la clínica desde `public/datos/` (también se pueden subir en *Cargar agenda*):
-
-| Archivo | Uso |
+| Pieza | Qué hace |
 |---|---|
-| `agenda-citas-estados.xlsx` (Agenda citas y estados) | 885 citas con estado: base de la segmentación, el riesgo y la radiografía |
-| `agenda-citas-detalle.xlsx` (Agenda y citas) | celular, correo, apoderado, hora y comentario; se cruza por `# Cita` / `# Paciente` |
-| `arancel-precios.xlsx` | precio de las acciones habilitadas para estimar el dinero en pausa |
-| `guiones.xlsx` | las 24 plantillas oficiales (integradas en `src/data/guiones.ts`) |
+| **Backend** (`../blissens-backend`) | Fuente de verdad. Lee los Excel con su ETL, guarda todo en `backend/blissens.db`, aplica las reglas (3-7-15, semáforo, riesgo) y los permisos por rol, y envía las campañas por WhatsApp (el token vive en su `.env`). |
+| **Better Auth** (`auth/`) | Inicio de sesión. Escribe `user`, `session`, `account` y `verification` en la misma base; el backend valida esa cookie. |
+| **Panel** (`src/`) | Al entrar pide `GET /api/v1/panel`: lo que el rol puede ver, ya recortado por el backend. Cada acción (contacto, nota, cupo, campaña, carga de Excel) llama a su endpoint y muestra lo que el backend devuelve. No guarda datos en el navegador. |
 
-**Segmentos (SRS RF-02):** se agrupan las citas por paciente y se mira la última (en un mismo día, la primera fila del Excel es la más reciente):
-1. última cita en fricción (Anulado, Anulado por WhatsApp, Cambio de fecha, No asiste, No confirmado, Notif. WhatsApp fallida) → *Sin reagendar* (115)
-2. última confirmada/notificada → *Activo* (16, fuera de la bandeja)
-3. diagnóstico atendido y ningún tratamiento atendido → *Diagnóstico sin tratamiento* (50)
-4. el resto → *Tratamiento en pausa / control de limpieza* (74)
+En desarrollo Vite atiende `/api/auth` (Better Auth) y pasa el resto de `/api` al backend en `:8000`, con la misma cookie.
 
-**Riesgo (RN-06):** 3 o más fallos históricos = 🔥 Riesgo alto y doble confirmación 24 h antes.
-
-> ⚠️ `public/datos/` contiene datos personales de pacientes y está en `.gitignore`. Tras clonar el repo, copia ahí los 4 Excel con esos nombres; si faltan, el panel lo avisa y se pueden subir desde *Cargar agenda*.
-
-## Base de datos del backend
-
-`backend/blissens.db` (SQLite, en `.gitignore` porque tiene datos de pacientes; estructura en [`docs/esquema.sql`](docs/esquema.sql) y guía de cada campo en [`docs/ESQUEMA.md`](docs/ESQUEMA.md)) guarda las citas, los pacientes y las tablas operativas del panel. Para que dé exactamente las mismas cifras que la app, se recalcula con el mismo lector de Excel:
+## Puesta en marcha
 
 ```bash
-npx tsx scripts/alinear.ts
+# backend (una vez): en ../blissens-backend
+python -m venv .venv && .venv\Scripts\python -m pip install -e ".[dev]"
+copy .env.example .env    # DATABASE_URL=sqlite:///../blissens/backend/blissens.db, mismo BETTER_AUTH_SECRET que el panel, AUTH_HABILITADA=true
+
+# panel (una vez): aquí
+npm install
+copy .env.example .env    # BETTER_AUTH_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+
+# cada día, en dos terminales
+npm run api               # backend en http://localhost:8000 (docs en /docs)
+npm run dev               # panel + login en http://localhost:3000
 ```
 
-El script es idempotente y además:
-- agrega `pacientes.fallos_seguidos`, `ultima_atendida` y `apoderado`, `ofertas_cupo.rechazo`, `agenda_libre.confirmado_el` y `cargas_excel.fecha_corte`;
-- agrega quién hizo cada acción, como llave a `user.id` de Better Auth (queda en `NULL` si se borra la cuenta): `registrado_por` en `contactos_seguimiento`, `notas_paciente`, `campanas`, `ofertas_cupo` y `cargas_excel`, y `asignado_por` en `agenda_libre`. FastAPI lo llena con `usuario_actual(...)["id"]`;
-- crea `etiquetas_paciente` (VIP, Valoración virtual, Rehabilitación, Alineadores, Convenio FLAIRES) y `configuracion` (asesora, fecha de corte, reglas);
-- recalcula riesgo, caso (con *pausa* separado de *diagnóstico*), antigüedad, celular con `+57`, valor del arancel y la acción usada, y el semáforo y "toca hoy" a la fecha de corte;
-- termina comparando la base con la app y falla si hay cualquier diferencia.
+Primera cuenta de gerencia: `npx tsx --env-file=.env auth/crear-admin.ts correo@dominio.com`. El resto se crea en *Cuentas*.
 
-Los turnos libres se guardan en `agenda_libre` (cada fila es un cupo) y sus ofertas en `ofertas_cupo`; `contactos_seguimiento.cupo_id` enlaza el contacto con el cupo asignado. `scripts/migrar.ts` renombra las tablas antiguas (`huecos_agenda`, `ofertas_hueco`, `hueco_id`) la primera vez que corre cualquiera de los dos scripts.
+En Google Cloud Console (*APIs y servicios → Credenciales → ID de cliente OAuth, aplicación web*) el URI de redirección autorizado es `http://localhost:3000/api/auth/callback/google` (en producción, el dominio del panel). Si cambian las tablas de Better Auth: `npx @better-auth/cli@1.4.21 migrate --config auth/auth.ts -y`. En producción Better Auth corre aparte con `npm run auth` (`:4000`).
 
-### Combinación con el modelo normalizado
+## Datos
 
-`datos/blissens_odontologia.db` (el modelo normalizado de origen, en `.gitignore`) se integra en la base del backend con:
+La base la construye el **ETL del backend** desde los 4 Excel del software (885 citas, 255 pacientes: 115 sin reagendar, 50 diagnóstico sin tratamiento, 74 pausa/control, 16 activos):
 
-```bash
-npx tsx scripts/combinar.ts datos/blissens_odontologia.db
-npx tsx scripts/alinear.ts
-```
+- **Cargar agenda** (recepción) sube los Excel al backend (`POST /api/v1/ingesta/cargar-archivos`); en *Ajustes* se pueden releer desde la carpeta del servidor.
+- **Recargar no borra lo trabajado.** Se conservan contactos, notas, procesos anteriores, cupos, ofertas, envíos de campañas, pacientes agregados a mano, el especialista reasignado y el celular si el Excel nuevo no lo trae. Si un paciente tiene un evento nuevo (por ejemplo, volvió a cancelar), sus contactos pasan a "procesos anteriores" y empieza un 3-7-15 limpio.
+- `datos/` (en `.gitignore`) guarda `blissens_odontologia.db`, el modelo normalizado de origen, y respaldos de la base.
 
-Agrega catálogos (`profesionales`, `especialidades`, `sucursales`, `sillones`, `usuarios_sistema`, `estados_cita`, `eventos_cita`), `tratamientos`, `cita_eventos` (las 24 columnas Sí/No del Excel por cita), `apoderados` y las categorías del arancel; y en `pacientes` la ficha extra (nombres y apellidos por separado, identificación, fecha de nacimiento, teléfono secundario, convenio, observaciones médicas). `estados_cita` guarda la regla de cada estado (`es_atendida`, `es_friccion`, `es_friccion_kpi`, `cuenta_como_fallo`, `es_confirmacion`), así el backend no la escribe a mano. No se importan el riesgo ni la antigüedad calculados en el origen porque usan otras reglas. El script valida que ambas fuentes cuenten la misma historia (estado, profesional, tratamiento, última cita, celular) y falla si algo no cuadra. `citas.numero_tratamiento` es la llave hacia `tratamientos` (SQLite no permite agregar la restricción a una columna existente; el script la valida).
+Estructura y significado de cada campo: [`docs/ESQUEMA.md`](docs/ESQUEMA.md). `python scripts/esquema.py` regenera [`docs/esquema.sql`](docs/esquema.sql) desde la base.
 
-Las columnas `semaforo`, `toca_hoy`, `dias_desde_evento`, `paso_protocolo_actual` y `fecha_proximo_contacto` son una foto a `cargas_excel.fecha_corte`; la app las recalcula con la fecha de trabajo.
+## Reglas (backend y panel aplican las mismas)
 
-## Regla 3-7-15
+- **3-7-15 (RN-05):** la etapa la marcan los días desde el evento: **rojo** urgente 0-3 días (también VIP y riesgo alto), **amarillo** día 7 (4-14 días), **verde** rescate día 15 (15+ días o control de limpieza). Un intento por etapa: quien canceló hace 40 días y no ha sido contactado va directo al rescate del día 15; si no responde, queda "agotado" y pasa a la campaña "Sin respuesta al 3-7-15". El día 3 se atiende apenas ocurre el evento.
+- **Desde cuándo corre:** la última cita; en *tratamiento en pausa*, cuando pasan 30 días sin volver (RN-03); en *control de limpieza*, a los 4 meses o a los que diga el comentario ("Limpieza 6 meses") (RN-04).
+- **Riesgo (RN-06):** cuentan los fallos (Cambio de fecha, Anulado, Anulado por WhatsApp, No asiste, No confirmado) **desde la última vez que asistió**: Alto = 3+ seguidos (doble confirmación 24 h antes); Medio = 1-2 seguidos o 3+ en total.
+- **VIP (RN-08):** al menos uno: paciente internacional (o valoración virtual), deportista de alto nivel, tratamiento de alto valor (implantes, rehabilitación oral, coronas, carillas o diseño de sonrisa, alineadores) o plan estimado de $10 M o más. El backend guarda el motivo (`pacientes.motivo_vip`) y el panel lo muestra en la ficha.
+- **Orden de todas las listas:** urgencia → VIP → riesgo alto → valor del tratamiento. En la app, "¿Cómo se prioriza?" lo explica.
 
-La etapa la marcan los días desde el evento (RN-05): **rojo** urgente 0-3 días (también VIP y riesgo alto), **amarillo** seguimiento día 7 (4-14 días), **verde** rescate día 15 (15+ días o limpieza preventiva). Un intento por etapa; si el rescate no funciona, el paciente pasa a la campaña "Sin respuesta al 3-7-15". La fecha de trabajo arranca en el cierre de la agenda cargada y se cambia en la barra lateral.
+La fecha de trabajo arranca en el cierre de la agenda cargada y se cambia en *Ajustes* (queda guardada en el backend).
 
 ## Desarrollo
 
 ```bash
-npm install
-npm run dev        # http://localhost:3000
-npx tsx src/lib/reglas.check.ts   # regla 3-7-15, semáforo, celulares, guiones y motor de campañas
-npx tsx src/lib/excel.check.ts    # cifras del SRS sobre los Excel reales (885 / 255 / 115-50-74-16 / 461) y casos de QA
+npm run lint                       # tipos del panel
+npx tsx src/lib/reglas.check.ts    # regla 3-7-15, semáforo, celulares, guiones y motor de campañas
+npx tsx src/lib/excel.check.ts     # cifras del SRS sobre los Excel reales y casos de QA
+# en ../blissens-backend
+.venv\Scripts\pytest               # 90 pruebas: dominio, ETL, QA del SRS, API, permisos por rol y recarga sin pérdida
 ```
-
-Los datos se guardan en el navegador (localStorage). "Restaurar datos de ejemplo" en el pie de página vuelve a los datos demo.

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { ArrowLeft, CalendarCheck, Flag, Megaphone, MessageCircle, MessagesSquare, Plus, RotateCcw, Search, SlidersHorizontal, StickyNote, UserMinus } from 'lucide-react';
+import { ArrowLeft, CalendarCheck, ChevronDown, Flag, Megaphone, MessageCircle, MessagesSquare, Plus, RotateCcw, Search, SlidersHorizontal, StickyNote, UserMinus } from 'lucide-react';
 import type { Antiguedad, Caso, Datos, Estado, Grupo, Paciente, Profesional, Segmento } from '../types';
 import { lineaDeTiempo, type TipoEvento } from '../lib/expediente';
 import {
@@ -12,15 +12,16 @@ import {
   PASOS,
   RESULTADO_TXT,
   SEGMENTO_TXT,
-  diasEntre,
   fechaCorta,
+  fechaQueToca,
+  pasoActual,
+  semaforo,
   linkWhatsApp,
   pesos,
   pesosCorto,
-  sumarDias,
   ultimoContacto,
 } from '../lib/reglas';
-import { Cifra, Encabezado, EtiquetaEstado, Iniciales, Insignias, Meta, Modal, Pestanas, QueEsFallo, Vacio, btnBorde, btnIris, btnNegro, textoRiesgo } from '../components/ui';
+import { Encabezado, EtiquetaEstado, Iniciales, Insignias, Meta, Modal, Pestanas, Punto, ComoSePrioriza, SEMAFORO_TXT, btnBorde, btnNegro, textoRiesgo } from '../components/ui';
 
 type FiltroEstado = 'todos' | Estado;
 type Orden = 'valor' | 'reciente' | 'nombre' | 'fallos';
@@ -305,155 +306,123 @@ function Expediente({
 }) {
   const [nota, setNota] = useState('');
   const eventos = lineaDeTiempo(p, datos.huecos, datos.campanas, datos.citas);
-  const intentos = p.contactos.length + p.ciclos.reduce((s, c) => s + c.contactos.length, 0);
-  const diasProceso = diasEntre(p.fechaEvento, p.recuperadoEl ?? hoy);
-  const citas = datos.huecos.filter((h) => h.ocupadoPor === p.id).length;
+  const paso = pasoActual(p, hoy);
+  const color = semaforo(p, hoy);
+  const toca = fechaQueToca(p, hoy);
+  const guardarNota = () => {
+    if (!nota.trim()) return;
+    onNota(p.id, nota.trim());
+    setNota('');
+  };
 
   return (
     <div>
-      <button onClick={onVolver} className="entrar mb-5 inline-flex items-center gap-2 text-sm font-semibold text-muted hover:text-ink">
-        <ArrowLeft className="size-4" /> Pacientes
+      <button onClick={onVolver} className="entrar mb-4 inline-flex items-center gap-2 rounded-full text-sm font-semibold text-muted hover:text-ink">
+        <ArrowLeft className="size-4" aria-hidden /> Pacientes
       </button>
 
-      <section className="entrar relative overflow-hidden rounded-[32px] bg-ink p-6 text-white sm:p-9">
-        <div className="aura iris pointer-events-none absolute -right-20 -top-28 size-[340px] rounded-full opacity-30 blur-3xl" />
-        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="flex items-center gap-5">
-            <Iniciales nombre={p.nombre} claro grande />
+      {/* quién es, en qué va y qué hacer */}
+      <section className="entrar card p-5 sm:p-7">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            <Iniciales nombre={p.nombre} grande />
             <div className="min-w-0">
               <div className="flex flex-wrap gap-1.5">
                 <EtiquetaEstado estado={p.estado} />
-                <Insignias p={p} oscuro detalle />
+                <Insignias p={p} detalle />
               </div>
-              <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">{p.nombre}</h1>
-              <p className="mt-1 text-sm text-white/55">
-                {p.idPaciente} · {p.telefono || '⚠️ Sin celular'} {p.email && `· ${p.email}`}
+              <h1 className="mt-1.5 text-2xl font-bold tracking-tight sm:text-3xl">{p.nombre}</h1>
+              <p className="mt-0.5 truncate text-sm text-muted">
+                {p.idPaciente} · {p.especialista}
+                {p.tratamiento && ` · ${p.tratamiento}`}
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex shrink-0 flex-wrap gap-2">
             {p.estado === 'pendiente' && (
-              <button onClick={() => onContactar(p)} className={btnIris}>
-                Contactar ahora
+              <button onClick={() => onContactar(p)} className={btnNegro}>
+                <MessageCircle className="size-4" aria-hidden /> Contactar
+              </button>
+            )}
+            {p.estado !== 'pendiente' && (
+              <button onClick={() => onReactivar(p.id)} className={btnNegro}>
+                <RotateCcw className="size-4" aria-hidden /> Reactivar seguimiento
               </button>
             )}
             {p.telefono && (
-              <a href={linkWhatsApp(p.telefono, '')} target="_blank" rel="noopener" className="inline-flex items-center gap-2 rounded-full bg-white/10 px-5 py-2.5 text-sm font-semibold hover:bg-white/20">
-                <MessageCircle className="size-4" /> WhatsApp
+              <a href={linkWhatsApp(p.telefono, '')} target="_blank" rel="noopener" className={btnBorde} aria-label="Abrir WhatsApp sin mensaje">
+                WhatsApp
               </a>
-            )}
-            {p.estado === 'pendiente' ? (
-              <button onClick={() => onDescartar(p.id)} className="inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-white/60 hover:bg-white/10 hover:text-white">
-                <UserMinus className="size-4" /> Sacar del seguimiento
-              </button>
-            ) : (
-              <button onClick={() => onReactivar(p.id)} className="inline-flex items-center gap-2 rounded-full bg-white/10 px-5 py-2.5 text-sm font-semibold hover:bg-white/20">
-                <RotateCcw className="size-4" /> Reactivar seguimiento
-              </button>
             )}
           </div>
         </div>
+
+        <dl className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-line lg:grid-cols-4">
+          <Clave k="Etapa">
+            <span className="flex items-center gap-2">
+              {color && <Punto color={color} />}
+              {paso ? `${color ? SEMAFORO_TXT[color] : ''} · día ${paso}` : ESTADO_TXT[p.estado]}
+            </span>
+            <ProcesoMini p={p} paso={paso} />
+          </Clave>
+          <Clave k={p.estado === 'pendiente' ? 'Siguiente contacto' : 'Cierre'}>
+            {toca ? (toca <= hoy ? 'Hoy' : fechaCorta(toca)) : p.recuperadoEl ? `Recuperado el ${fechaCorta(p.recuperadoEl)}` : '—'}
+            <span className="block text-xs font-normal text-muted">
+              {CASO_TXT[p.caso]} · {fechaCorta(p.fechaEvento)}
+            </span>
+          </Clave>
+          <Clave k="Valor estimado">
+            {p.valor ? pesosCorto(p.valor) : '—'}
+            <span className="block text-xs font-normal text-muted">según el arancel</span>
+          </Clave>
+          <Clave k="Riesgo de inasistencia">
+            {p.nivelRiesgo}
+            <span className="block text-xs font-normal text-muted">
+              {p.fallosSeguidos} seguidas · {p.fallosHistoricos} en total
+            </span>
+          </Clave>
+        </dl>
       </section>
 
-      <dl className="escalonado mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Dato k="Valor del plan" v={<Cifra valor={p.valor} formato={(n) => (p.valor ? pesosCorto(n) : '—')} />} />
-        <Dato k={p.estado === 'recuperado' ? 'Días hasta recuperarlo' : 'Días en proceso'} v={<Cifra valor={diasProceso} />} />
-        <Dato k="Intentos de contacto" v={<Cifra valor={intentos} />} />
-        <Dato k="Citas por agenda libre" v={<Cifra valor={citas} />} />
-      </dl>
-
-      {/* proceso actual */}
-      <section className="entrar card mt-4 p-6 sm:p-7">
-        <h2 className="kicker">Proceso actual</h2>
-        <ol className="mt-5 grid grid-cols-5 gap-2">
-          <Nodo titulo={CASO_TXT[p.caso]} sub={fechaCorta(p.fechaEvento)} tono="mal" activo />
-          {PASOS.map((d) => {
-            const c = p.contactos.find((x) => x.paso === d);
-            const tono = !c ? 'vacio' : c.resultado === 'agendo' ? 'ok' : c.resultado === 'no_interesa' ? 'mal' : 'hecho';
-            return <Nodo key={d} titulo={`Día ${d}`} sub={c ? RESULTADO_TXT[c.resultado] : fechaCorta(sumarDias(p.fechaEvento, d))} tono={tono} activo={!!c} />;
-          })}
-          <Nodo
-            titulo={p.estado === 'pendiente' ? 'Abierto' : ESTADO_TXT[p.estado]}
-            sub={p.recuperadoEl ? fechaCorta(p.recuperadoEl) : p.estado === 'pendiente' ? 'en curso' : ''}
-            tono={p.estado === 'recuperado' ? 'ok' : p.estado === 'pendiente' ? 'vacio' : 'hecho'}
-            activo={p.estado !== 'pendiente'}
-            ultimo
-          />
-        </ol>
-      </section>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-[340px_1fr]">
-        <div className="space-y-4">
-          <section className="entrar card p-6">
-            <h2 className="kicker">Datos</h2>
-            <dl className="mt-3 space-y-3 text-sm">
-              <Fila k="Segmento SRS" v={`${p.grupo}. ${GRUPO_TXT[p.grupo]}`} />
-              <Fila k="Riesgo de inasistencia" v={p.nivelRiesgo} />
-              <Fila k="Seguidas sin asistir" v={String(p.fallosSeguidos)} />
-              <Fila k="Fallos en todo el historial" v={String(p.fallosHistoricos)} />
-              <Fila k="Última vez que asistió" v={p.ultimaAtendida ? fechaCorta(p.ultimaAtendida) : 'Nunca'} />
-              <Fila k="Antigüedad" v={p.antiguedad} />
-              {p.ultimaCita && <Fila k="Última cita" v={`${fechaCorta(p.ultimaCita.fecha)} · ${p.ultimaCita.estado}`} />}
-              <Fila k="Comentario / tratamiento" v={p.tratamiento} />
-              <Fila k="Especialista" v={p.especialista} />
-              <Fila k="Motivo registrado" v={MOTIVO_TXT[p.motivo]} />
-              <Fila k="Correo" v={p.email || '—'} />
-              {p.apoderado && <Fila k="Apoderado" v={p.apoderado} />}
-              {p.valor > 0 && <Fila k="Valor estimado (arancel)" v={pesos(p.valor)} />}
-              {p.valorReferencia && <Fila k="Calculado con" v={`${p.valorReferencia.acciones.join(' + ')} (por ${p.valorReferencia.fuente})`} />}
-              <Fila k="Origen" v={{ excel: 'Agenda en Excel', manual: 'Registro manual' }[p.origen]} />
-              <Fila k="En el panel desde" v={fechaCorta(p.creadoEl)} />
-              {p.ciclos.length > 0 && <Fila k="Procesos anteriores" v={String(p.ciclos.length)} />}
-            </dl>
-            <p className="mt-4 text-xs text-muted" title={textoRiesgo(p)}>
-              {textoRiesgo(p)}.
-            </p>
-            <QueEsFallo className="mt-2" />
-          </section>
-          <section className="entrar card p-6">
-            <h2 className="kicker">Nota interna</h2>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!nota.trim()) return;
-                onNota(p.id, nota.trim());
-                setNota('');
-              }}
-            >
-              <textarea
-                value={nota}
-                onChange={(e) => setNota(e.target.value)}
-                rows={3}
-                placeholder="Ej: prefiere que la llamen después de las 5 p. m."
-                className="field mt-3"
-              />
-              <button disabled={!nota.trim()} className={`${btnNegro} mt-2 w-full`}>
-                Guardar nota
-              </button>
-            </form>
-          </section>
-        </div>
-
-        <section className="entrar card p-6 sm:p-7">
-          <h2 className="kicker">Historia completa</h2>
+      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_320px]">
+        {/* historia: lo que pasó, con la nota interna arriba */}
+        <section className="entrar card p-5 sm:p-7" aria-labelledby="t-historia">
+          <h2 id="t-historia" className="text-lg font-semibold">
+            Historia
+          </h2>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              guardarNota();
+            }}
+            className="mt-4 flex gap-2"
+          >
+            <label className="sr-only" htmlFor="nota-interna">
+              Nota interna
+            </label>
+            <input id="nota-interna" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Agregar una nota interna…" className="field rounded-full" />
+            <button disabled={!nota.trim()} className={`${btnNegro} shrink-0 px-4`}>
+              <StickyNote className="size-4" aria-hidden /> Guardar
+            </button>
+          </form>
           {eventos.length === 0 ? (
-            <Vacio titulo="Sin movimientos" texto="Aquí aparecerán los contactos, campañas y citas del paciente." />
+            <p className="py-10 text-center text-sm text-muted">Aquí aparecerán los contactos, campañas, citas y notas.</p>
           ) : (
-            <ol className="escalonado relative mt-5 space-y-5 before:absolute before:bottom-2 before:left-[15px] before:top-2 before:w-px before:bg-line">
+            <ol className="relative mt-6 space-y-5 before:absolute before:bottom-2 before:left-[15px] before:top-2 before:w-px before:bg-line">
               {eventos.map((e, i) => {
                 const Ico = ICONO[e.tipo];
                 return (
                   <li key={i} className="relative flex gap-4">
                     <span
                       className={`relative z-10 grid size-8 shrink-0 place-items-center rounded-full ring-4 ring-white ${
-                        e.tono === 'ok' ? 'iris text-ink' : e.tono === 'mal' ? 'bg-rojo text-white' : 'bg-ink text-white'
+                        e.tono === 'ok' ? 'iris text-ink' : e.tono === 'mal' ? 'bg-rojo/10 text-rojo' : 'bg-soft text-ink/70'
                       }`}
                     >
-                      <Ico className="size-3.5" />
+                      <Ico className="size-3.5" aria-hidden />
                     </span>
-                    <div className="min-w-0 flex-1 pb-1">
+                    <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                        <p className="font-semibold">{e.titulo}</p>
+                        <p className="text-[14px] font-semibold">{e.titulo}</p>
                         <p className="num text-xs text-muted">{fechaCorta(e.fecha)}</p>
                       </div>
                       {e.detalle && <p className="mt-0.5 text-sm leading-relaxed text-muted">{e.detalle}</p>}
@@ -464,38 +433,92 @@ function Expediente({
             </ol>
           )}
         </section>
+
+        {/* ficha: solo lo útil a la vista; el resto, plegado */}
+        <aside className="entrar card h-fit p-5 sm:p-6" aria-labelledby="t-ficha">
+          <h2 id="t-ficha" className="text-lg font-semibold">
+            Ficha
+          </h2>
+          <Grupo titulo="Contacto">
+            <Fila k="Celular" v={p.telefono || 'Sin celular'} />
+            <Fila k="Correo" v={p.email || '—'} />
+            {p.apoderado && <Fila k="Apoderado" v={p.apoderado} />}
+          </Grupo>
+          {p.motivoVip && (
+            <Grupo titulo="Por qué es VIP">
+              <p className="text-sm font-medium">{p.motivoVip}</p>
+            </Grupo>
+          )}
+          <Grupo titulo="Atención">
+            <Fila k="Especialista" v={p.especialista} />
+            {p.ultimaCita && <Fila k="Última cita" v={`${fechaCorta(p.ultimaCita.fecha)} · ${p.ultimaCita.estado}`} />}
+            <Fila k="Última vez que asistió" v={p.ultimaAtendida ? fechaCorta(p.ultimaAtendida) : 'Nunca'} />
+            <Fila k="Motivo registrado" v={MOTIVO_TXT[p.motivo]} />
+          </Grupo>
+          <details className="group mt-5 border-t border-line pt-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-ink/75 hover:text-ink [&::-webkit-details-marker]:hidden">
+              Más datos <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden />
+            </summary>
+            <dl className="mt-3 space-y-2.5 text-sm">
+              <Fila k="Segmento" v={`${p.grupo}. ${GRUPO_TXT[p.grupo]}`} />
+              <Fila k="Antigüedad" v={p.antiguedad} />
+              {p.valorReferencia && <Fila k="Valor calculado con" v={p.valorReferencia.acciones.join(' + ')} />}
+              {p.valor > 0 && <Fila k="Valor exacto" v={pesos(p.valor)} />}
+              <Fila k="Origen" v={{ excel: 'Agenda en Excel', manual: 'Registro manual' }[p.origen]} />
+              <Fila k="En el panel desde" v={fechaCorta(p.creadoEl)} />
+              {p.ciclos.length > 0 && <Fila k="Procesos anteriores" v={String(p.ciclos.length)} />}
+            </dl>
+            <p className="mt-3 text-xs text-muted">{textoRiesgo(p)}.</p>
+            <ComoSePrioriza className="mt-2" />
+          </details>
+          {p.estado === 'pendiente' && (
+            <button onClick={() => onDescartar(p.id)} className="mt-5 inline-flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-rojo">
+              <UserMinus className="size-3.5" aria-hidden /> Sacar del seguimiento
+            </button>
+          )}
+        </aside>
       </div>
     </div>
   );
 }
 
-function Dato({ k, v }: { k: string; v: ReactNode }) {
+function Clave({ k, children }: { k: string; children: ReactNode }) {
   return (
-    <div className="card rounded-[22px] p-5">
-      <dd className="text-[28px] font-bold leading-none tracking-tight">{v}</dd>
-      <dt className="mt-2 text-xs text-muted">{k}</dt>
+    <div className="bg-white p-4">
+      <dt className="text-xs text-muted">{k}</dt>
+      <dd className="mt-1 text-[15px] font-semibold">{children}</dd>
     </div>
+  );
+}
+
+function Grupo({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return (
+    <section className="mt-5">
+      <h3 className="kicker">{titulo}</h3>
+      <dl className="mt-2 space-y-2.5 text-sm">{children}</dl>
+    </section>
   );
 }
 
 function Fila({ k, v }: { k: string; v: string }) {
   return (
     <div className="flex justify-between gap-4">
-      <dt className="text-muted">{k}</dt>
-      <dd className="text-right font-medium">{v}</dd>
+      <dt className="shrink-0 text-muted">{k}</dt>
+      <dd className="min-w-0 break-words text-right font-medium">{v}</dd>
     </div>
   );
 }
 
-function Nodo({ titulo, sub, tono, activo, ultimo }: { titulo: string; sub: string; tono: 'ok' | 'mal' | 'hecho' | 'vacio'; activo: boolean; ultimo?: boolean }) {
-  const punto = { ok: 'iris', mal: 'bg-rojo', hecho: 'bg-ink', vacio: 'bg-white ring-2 ring-line' }[tono];
+// los tres intentos del 3-7-15 en una línea
+function ProcesoMini({ p, paso }: { p: Paciente; paso: number | null }) {
   return (
-    <li className="relative">
-      {!ultimo && <span className={`absolute left-3 right-0 top-[11px] h-0.5 ${activo ? 'bg-ink/80' : 'bg-line'} crecer-x`} />}
-      <span className={`pop relative z-10 block size-6 rounded-full ${punto}`} />
-      <p className="mt-3 text-[13px] font-semibold leading-tight">{titulo}</p>
-      <p className="text-xs text-muted">{sub}</p>
-    </li>
+    <span className="mt-2 flex items-center gap-1" aria-hidden>
+      {PASOS.map((d) => {
+        const c = p.contactos.find((x) => x.paso === d);
+        const cls = c ? (c.resultado === 'agendo' ? 'iris' : c.resultado === 'no_interesa' ? 'bg-rojo' : 'bg-ink') : d === paso ? 'bg-ink/30' : 'bg-line';
+        return <span key={d} className={`h-1.5 w-6 rounded-full ${cls}`} title={c ? `Día ${d}: ${RESULTADO_TXT[c.resultado]}` : `Día ${d}`} />;
+      })}
+    </span>
   );
 }
 

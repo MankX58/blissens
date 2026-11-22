@@ -74,17 +74,15 @@ export const tocaHoy = (p: Paciente, hoy: string) => {
   return f !== null && f <= hoy;
 };
 
-export const altoValor = (p: Paciente) => esVIP(p) || p.segmento !== 'local' || p.valor >= 10_000_000;
-
-// orden de la bandeja: rojo → amarillo → verde, luego riesgo, alto valor y valor
+// orden de todas las listas (igual que el backend): urgencia → VIP → riesgo alto → valor
 const PESO: Record<Semaforo, number> = { rojo: 0, amarillo: 1, verde: 2 };
 export function ordenarDelDia(lista: Paciente[], hoy: string) {
   return [...lista].sort((a, b) => {
     const sa = PESO[semaforo(a, hoy) ?? 'verde'];
     const sb = PESO[semaforo(b, hoy) ?? 'verde'];
     if (sa !== sb) return sa - sb;
+    if (esVIP(a) !== esVIP(b)) return esVIP(a) ? -1 : 1;
     if (riesgoAlto(a) !== riesgoAlto(b)) return riesgoAlto(a) ? -1 : 1;
-    if (altoValor(a) !== altoValor(b)) return altoValor(a) ? -1 : 1;
     return b.valor - a.valor;
   });
 }

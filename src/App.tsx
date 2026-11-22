@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { BarChart3, CalendarClock, FileSpreadsheet, Megaphone, Sparkles, UserCog, Users } from 'lucide-react';
-import type { Campana, ConfigWA, Datos, Hueco, Motivo, Paciente, Pantalla, Resultado } from './types';
-import { cargarDatosIniciales, datosDesdeCarga, datosVacios } from './data/inicial';
-import { hoyISO, nuevoCiclo, pasoActual, registrarContacto, tocaHoy } from './lib/reglas';
-import { apiConectada, enviarPorAPI, siguientePaso } from './lib/campanas';
+import { BarChart3, CalendarClock, FileSpreadsheet, House, Megaphone, Sparkles, UserCog, Users } from 'lucide-react';
+import type { Campana, Datos, Hueco, Motivo, Paciente, Pantalla, Profesional, Resultado } from './types';
+import { ESPECIALISTAS, hoyISO, tocaHoy } from './lib/reglas';
+import { siguientePaso } from './lib/campanas';
 import { puedeVer, type Rol } from './lib/roles';
 import { authClient, esRol } from './lib/auth';
-import type { Carga } from './lib/excel';
+import { ErrorApi, api } from './lib/api';
 import { Contactar } from './components/Contactar';
-import { Sonrisa } from './components/ui';
+import { Sonrisa, Vacio } from './components/ui';
 import { Ajustes, Navegacion, type Item } from './components/Navegacion';
 import { Login } from './screens/Login';
 import { Cuentas } from './screens/Cuentas';
@@ -18,24 +17,14 @@ import { Agenda } from './screens/Agenda';
 import { Campanas } from './screens/Campanas';
 import { Pacientes } from './screens/Pacientes';
 import { Indicadores } from './screens/Indicadores';
-
-const CLAVE = 'blissens-panel-v6';
-
-function cargarGuardado(): Datos | null {
-  try {
-    const g = JSON.parse(localStorage.getItem(CLAVE) ?? '');
-    if (Array.isArray(g.pacientes) && Array.isArray(g.citas) && Array.isArray(g.campanas) && g.fechaCorte) return g;
-  } catch {
-    /* sin datos guardados */
-  }
-  return null;
-}
+import { Inicio } from './screens/Inicio';
 
 export interface Usuario {
   id: string;
   nombre: string;
   email: string;
   rol: Rol;
+  profesional?: Profesional; // solo especialistas: su agenda
 }
 
 const Pantallazo = ({ children }: { children: ReactNode }) => (
@@ -54,49 +43,48 @@ export default function App() {
   if (isPending) return <Pantallazo><p className="mt-4 text-sm text-white/60">Verificando tu sesión…</p></Pantallazo>;
   if (!sesion) return <Login />;
   const { id, name, email, role } = sesion.user;
+  const prof = (sesion.user as { profesional?: string | null }).profesional;
+  const profesional = ESPECIALISTAS.find((e) => e === prof);
   if (!esRol(role))
     return (
       <Pantallazo>
-        <p className="mt-4 max-w-sm text-sm text-white/70">Tu cuenta ({email}) no tiene un rol del panel. Pídele a dirección que te asigne uno.</p>
+        <p className="mt-4 max-w-sm text-sm text-white/70">Tu cuenta ({email}) no tiene un rol del panel. Pídele a gerencia que te asigne uno.</p>
         <button onClick={() => authClient.signOut()} className="mt-4 rounded-full bg-white px-5 py-2 text-sm font-semibold text-ink">
           Cerrar sesión
         </button>
       </Pantallazo>
     );
-  return <ConDatos usuario={{ id, nombre: name, email, rol: role }} />;
+  return <ConDatos usuario={{ id, nombre: name, email, rol: role, profesional }} />;
 }
 
-// Primera vez: lee los 4 Excel reales de la clínica desde /public/datos
+// Los datos vienen del backend (/api/v1/panel), ya recortados según el rol de la sesión
 function ConDatos({ usuario }: { usuario: Usuario }) {
-  const [inicial, setInicial] = useState<Datos | null>(cargarGuardado);
+  const [inicial, setInicial] = useState<Datos | null>(null);
   const [error, setError] = useState('');
   const cargar = () => {
     setError('');
-    cargarDatosIniciales()
+    api
+      .panel()
       .then(setInicial)
-      .catch((e: Error) => setError(e.message));
+      .catch((e: Error) => {
+        if (e instanceof ErrorApi && e.status === 401) authClient.signOut();
+        else setError(e.message);
+      });
   };
-  useEffect(() => {
-    if (!inicial) cargar();
-  }, []);
+  useEffect(cargar, []);
   if (inicial) return <Panel inicial={inicial} usuario={usuario} />;
   return (
     <Pantallazo>
-        {error ? (
-          <>
-            <p className="mt-4 text-sm text-white/70">No se pudieron leer los archivos de la clínica: {error}</p>
-            <div className="mt-4 flex justify-center gap-2">
-              <button onClick={cargar} className="rounded-full bg-white px-5 py-2 text-sm font-semibold text-ink">
-                Reintentar
-              </button>
-              <button onClick={() => setInicial(datosVacios(hoyISO()))} className="rounded-full bg-white/10 px-5 py-2 text-sm font-semibold">
-                Subir los Excel a mano
-              </button>
-            </div>
-          </>
-        ) : (
-          <p className="mt-4 text-sm text-white/60">Leyendo la agenda, el arancel y los guiones…</p>
-        )}
+      {error ? (
+        <>
+          <p className="mt-4 max-w-sm text-sm text-white/70">No se pudieron cargar los datos de la clínica: {error}</p>
+          <button onClick={cargar} className="mt-4 rounded-full bg-white px-5 py-2 text-sm font-semibold text-ink">
+            Reintentar
+          </button>
+        </>
+      ) : (
+        <p className="mt-4 text-sm text-white/60">Cargando pacientes, agenda y campañas…</p>
+      )}
     </Pantallazo>
   );
 }
@@ -107,27 +95,21 @@ interface Aviso {
   deshacer?: () => void;
 }
 
-// primera pantalla del menú que puede ver cada rol
-const INICIO: Record<Rol, Pantalla> = { auxiliar: 'hoy', recepcion: 'agenda', mercadeo: 'campanas', direccion: 'hoy' };
-
 function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
   const [datos, setDatos] = useState(inicial);
-  const { pacientes, huecos, campanas, config } = datos;
-  const hoy = datos.fechaCorte; // fecha de trabajo (por defecto, el cierre de la agenda cargada)
-  const inicio = INICIO[usuario.rol];
+  const { pacientes, huecos, campanas } = datos;
+  const hoy = datos.fechaCorte; // fecha de trabajo (la del backend; por defecto, el cierre de la agenda cargada)
+  const inicio: Pantalla = 'inicio';
   const [pantalla, setPantalla] = useState<Pantalla>(inicio);
+  // el backend ya recorta los datos por rol; este filtro solo es una segunda barrera en pantalla
+  const vista: Datos =
+    usuario.rol === 'especialista'
+      ? { ...datos, pacientes: pacientes.filter((p) => p.especialista === usuario.profesional), huecos: huecos.filter((h) => h.especialista === usuario.profesional) }
+      : datos;
   const [expediente, setExpediente] = useState<string | null>(null);
   const [contactando, setContactando] = useState<Paciente | null>(null);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [ajustes, setAjustes] = useState(false);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(CLAVE, JSON.stringify(datos));
-    } catch {
-      /* almacenamiento lleno o bloqueado */
-    }
-  }, [datos]);
 
   useEffect(() => {
     if (!aviso) return;
@@ -139,201 +121,166 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
     window.scrollTo({ top: 0 });
   }, [pantalla, expediente]);
 
-  // ---------- acciones ----------
+  // ---------- acciones: cada una va al backend y aplica lo que él devuelve ----------
   const ref = useRef(datos);
   ref.current = datos;
-  const cambiarPacientes = (fn: (ps: Paciente[]) => Paciente[]) => setDatos((d) => ({ ...d, pacientes: fn(d.pacientes) }));
-  const cambiarPaciente = (id: string, fn: (p: Paciente) => Paciente) => cambiarPacientes((ps) => ps.map((p) => (p.id === id ? fn(p) : p)));
-  const actualizarCampana = (id: string, fn: (c: Campana) => Campana) =>
-    setDatos((d) => ({ ...d, campanas: d.campanas.map((c) => (c.id === id ? fn(c) : c)) }));
+  const ponerPaciente = (p: Paciente) =>
+    setDatos((d) => ({ ...d, pacientes: d.pacientes.some((x) => x.id === p.id) ? d.pacientes.map((x) => (x.id === p.id ? p : x)) : [p, ...d.pacientes] }));
+  const ponerHueco = (h: Hueco) => setDatos((d) => ({ ...d, huecos: d.huecos.some((x) => x.id === h.id) ? d.huecos.map((x) => (x.id === h.id ? h : x)) : [...d.huecos, h] }));
+  const ponerCampana = (c: Campana) =>
+    setDatos((d) => ({ ...d, campanas: d.campanas.some((x) => x.id === c.id) ? d.campanas.map((x) => (x.id === c.id ? c : x)) : [c, ...d.campanas] }));
+  const nombre = (id?: string) => pacientes.find((p) => p.id === id)?.nombre.split(' ')[0] ?? 'Paciente';
+  const recargar = () => api.panel().then(setDatos);
 
-  // ---------- motor de campañas: un mensaje cada "ritmo" segundos mientras el panel esté abierto ----------
+  // envuelve una llamada: si falla, avisa con el mensaje del backend (la sesión vencida vuelve al login)
+  const intentar = async <T,>(accion: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await accion();
+    } catch (e) {
+      if (e instanceof ErrorApi && e.status === 401) authClient.signOut();
+      setAviso({ texto: e instanceof Error ? e.message : 'No se pudo guardar el cambio' });
+    }
+  };
+  // tras tocar un cupo, el paciente también cambia (recuperado, vuelve al 3-7-15…)
+  const refrescarPaciente = (id?: string) => id && puedeVer(usuario.rol, 'pacientes') && intentar(() => api.expediente(id).then(ponerPaciente));
+
+  // ---------- motor de campañas: el backend envía un mensaje cada "ritmo" segundos mientras el panel esté abierto ----------
   const ocupado = useRef(false);
   useEffect(() => {
+    if (!puedeVer(usuario.rol, 'campanas')) return;
     const t = setInterval(async () => {
       if (ocupado.current) return;
-      const ahora = Date.now();
-      for (const c of ref.current.campanas) {
-        const paso = siguientePaso(c, ahora);
-        if (paso.tipo === 'nada') continue;
-        if (paso.tipo === 'completar') {
-          actualizarCampana(c.id, (x) => ({ ...x, estado: 'completada' }));
-          return;
-        }
-        ocupado.current = true;
-        const e = c.envios[paso.idx];
-        let estado: 'enviado' | 'fallo' = 'enviado';
-        let error: string | undefined;
-        try {
-          if (c.canal === 'api') await enviarPorAPI(ref.current.config, e.telefono, e.texto, e.nombre);
-        } catch (err) {
-          estado = 'fallo';
-          error = err instanceof Error ? err.message : 'Error desconocido';
-        }
+      const c = ref.current.campanas.find((x) => siguientePaso(x, Date.now()).tipo !== 'nada');
+      if (!c) return;
+      ocupado.current = true;
+      try {
+        ponerCampana(await api.enviarSiguiente(c.id));
+      } catch (e) {
+        setAviso({ texto: `Campaña “${c.nombre}”: ${e instanceof Error ? e.message : 'error al enviar'}` });
+        ponerCampana({ ...c, estado: 'pausada' }); // no reintenta en bucle
+      } finally {
         ocupado.current = false;
-        actualizarCampana(c.id, (x) =>
-          x.estado === 'cancelada' || x.estado === 'pausada'
-            ? x
-            : { ...x, estado: 'enviando', envios: x.envios.map((y, i) => (i === paso.idx ? { ...y, estado, error, fecha: new Date().toISOString() } : y)) }
-        );
-        return;
       }
     }, 1000);
     return () => clearInterval(t);
   }, []);
 
-  // deshacer solo restaura pacientes y agenda; las campañas siguen su curso
-  const conDeshacer = (texto: string, cambio: (d: Datos) => Datos, exito = false) => {
-    const antes = ref.current;
-    setDatos(cambio);
-    setAviso({ texto, exito, deshacer: () => setDatos((d) => ({ ...d, pacientes: antes.pacientes, huecos: antes.huecos })) });
-  };
-
-  const guardarContacto = (p: Paciente, r: Resultado, mensaje: string, motivo: Motivo, nota: string) => {
-    const act = registrarContacto(p, r, mensaje, motivo, hoy, nota || undefined);
-    conDeshacer(
-      r === 'agendo' ? `${p.nombre.split(' ')[0]} recuperado` : `Contacto con ${p.nombre.split(' ')[0]} guardado`,
-      (d) => ({ ...d, pacientes: d.pacientes.map((x) => (x.id === p.id ? act : x)) }),
-      r === 'agendo'
-    );
+  const guardarContacto = async (p: Paciente, r: Resultado, mensaje: string, motivo: Motivo, nota: string) => {
+    const act = await intentar(() => api.contactar(p.id, { resultado: r, mensaje, motivo, nota: nota || undefined }));
+    if (!act) return;
+    ponerPaciente(act);
     setContactando(null);
+    setAviso({ texto: r === 'agendo' ? `${nombre(p.id)} recuperado` : `Contacto con ${nombre(p.id)} guardado`, exito: r === 'agendo' });
   };
 
-  // Nueva carga del Excel: se conserva lo trabajado (contactos, notas, procesos) cruzando por # Paciente
-  const agregarDeExcel = (c: Carga) => {
-    const previos = new Map(pacientes.map((p) => [p.idPaciente, p]));
-    let actualizados = 0;
-    const lista = c.pacientes.map((n): Paciente => {
-      const v = previos.get(n.idPaciente);
-      if (!v) return n;
-      actualizados++;
-      const base = { ...n, notas: v.notas, ciclos: v.ciclos, telefono: n.telefono || v.telefono, especialista: v.especialista };
-      if (v.caso === n.caso && v.fechaEvento === n.fechaEvento)
-        return { ...base, contactos: v.contactos, estado: v.estado === 'activo' ? n.estado : v.estado, motivo: v.motivo, recuperadoEl: v.recuperadoEl };
-      return v.contactos.length ? { ...base, ciclos: [...v.ciclos, { caso: v.caso, fechaEvento: v.fechaEvento, contactos: v.contactos, cierre: v.estado, motivo: v.motivo }] } : base;
-    });
-    const manuales = pacientes.filter((p) => p.origen === 'manual' && !lista.some((n) => n.idPaciente === p.idPaciente));
-    const nuevo = datosDesdeCarga(c, datos);
-    conDeshacer(`Agenda cargada: ${c.pacientes.length} pacientes (${actualizados} ya estaban), corte ${c.fechaCorte}`, () => ({
-      ...nuevo,
-      pacientes: [...manuales, ...lista],
-    }));
-    setPantalla('hoy');
+  // Nueva carga de los Excel: el ETL del backend conserva lo trabajado (contactos, notas, procesos, cupos)
+  const subirExcel = async (archivos: Parameters<typeof api.subirExcel>[0]) => {
+    const r = await intentar(() => api.subirExcel(archivos));
+    if (!r) return false;
+    await intentar(recargar);
+    setAviso({ texto: `Agenda cargada: ${r.total_pacientes} pacientes y ${r.total_citas} citas. Se conservó lo trabajado.`, exito: true });
+    setPantalla(inicio);
+    return true;
   };
 
-  const cambiarTelefono = (id: string, telefono: string) => {
-    cambiarPaciente(id, (p) => ({ ...p, telefono, segmento: telefono.startsWith('+57') ? p.segmento : 'internacional' }));
-    setContactando((c) => (c && c.id === id ? { ...c, telefono } : c));
+  const cambiarTelefono = async (id: string, telefono: string) => {
+    const act = await intentar(() => api.actualizar(id, { celular: telefono }));
+    if (!act) return;
+    ponerPaciente(act);
+    setContactando((c) => (c && c.id === id ? act : c));
     setAviso({ texto: 'Celular guardado' });
   };
 
   // RF-10: viaje del Dr. Olarte → el paciente pasa a la agenda de la Dra. Sara
-  const reasignar = (id: string) => {
-    conDeshacer('Paciente reasignado a la Dra. Sara López', (d) => ({
-      ...d,
-      pacientes: d.pacientes.map((p) =>
-        p.id === id
-          ? { ...p, especialista: 'Dra. Sara López', notas: [...p.notas, { fecha: hoy, texto: 'Reasignado del Dr. Juan Manuel Olarte a la Dra. Sara López por viaje del doctor.' }] }
-          : p
-      ),
-    }));
-    setContactando((c) => (c && c.id === id ? { ...c, especialista: 'Dra. Sara López' } : c));
+  const reasignar = async (id: string) => {
+    const ok = await intentar(async () => {
+      await api.actualizar(id, { profesional_principal: 'Dra. Sara López' });
+      await api.nota(id, 'Reasignado del Dr. Juan Manuel Olarte a la Dra. Sara López por viaje del doctor.');
+      return api.expediente(id);
+    });
+    if (!ok) return;
+    ponerPaciente(ok);
+    setContactando((c) => (c && c.id === id ? ok : c));
+    setAviso({ texto: 'Paciente reasignado a la Dra. Sara López' });
   };
 
-  const asignarHueco = (huecoId: string, pacienteId: string) => {
-    const p = pacientes.find((x) => x.id === pacienteId)!;
-    const h = huecos.find((x) => x.id === huecoId)!;
-    conDeshacer(
-      `${p.nombre.split(' ')[0]} agendado el ${h.hora}`,
-      (d) => ({
-        ...d,
-        huecos: d.huecos.map((x) => (x.id === huecoId ? { ...x, ocupadoPor: pacienteId, asignadoEl: hoy, estadoPrevio: p.estado } : x)),
-        pacientes: d.pacientes.map((x) =>
-          x.id === pacienteId
-            ? {
-                ...x,
-                estado: 'recuperado',
-                recuperadoEl: hoy,
-                contactos: [
-                  ...x.contactos,
-                  { fecha: hoy, paso: pasoActual(x, hoy) ?? 15, resultado: 'agendo', mensaje: `(asignado a la agenda libre ${h.fecha} ${h.hora})`, huecoId },
-                ],
-              }
-            : x
-        ),
-      }),
-      true
-    );
+  const revertirHueco = async (huecoId: string, silencioso = false) => {
+    const paciente = ref.current.huecos.find((x) => x.id === huecoId)?.ocupadoPor;
+    const h = await intentar(() => api.revertir(huecoId));
+    if (!h) return;
+    ponerHueco(h);
+    await refrescarPaciente(paciente);
+    if (!silencioso) setAviso({ texto: `Asignación revertida: ${nombre(paciente)} vuelve a seguimiento` });
   };
 
-  const revertirHueco = (huecoId: string) => {
-    const h = huecos.find((x) => x.id === huecoId)!;
-    const p = pacientes.find((x) => x.id === h.ocupadoPor);
-    conDeshacer(`Asignación revertida${p ? `: ${p.nombre.split(' ')[0]} vuelve a seguimiento` : ''}`, (d) => ({
-      ...d,
-      huecos: d.huecos.map((x) => (x.id === huecoId ? { ...x, ocupadoPor: undefined, asignadoEl: undefined, estadoPrevio: undefined, asistencia: undefined, confirmadoEl: undefined, ofertas: x.ofertas.filter((o) => o.pacienteId !== x.ocupadoPor) } : x)),
-      pacientes: d.pacientes.map((x) =>
-        x.id === h.ocupadoPor
-          ? { ...x, estado: h.estadoPrevio ?? 'pendiente', recuperadoEl: undefined, contactos: x.contactos.filter((c) => c.huecoId !== huecoId) }
-          : x
-      ),
-    }));
+  const asignarHueco = async (huecoId: string, pacienteId: string) => {
+    const h = await intentar(() => api.asignar(huecoId, pacienteId));
+    if (!h) return;
+    ponerHueco(h);
+    await refrescarPaciente(pacienteId);
+    setAviso({ texto: `${nombre(pacienteId)} agendado el ${h.hora}`, exito: true, deshacer: () => revertirHueco(huecoId, true) });
   };
 
-  const marcarAsistencia = (huecoId: string, a: 'asistio' | 'no_asistio') => {
-    const h = huecos.find((x) => x.id === huecoId)!;
-    conDeshacer(a === 'asistio' ? 'Asistencia registrada' : 'Inasistencia registrada: vuelve a la regla 3-7-15', (d) => ({
-      ...d,
-      huecos: d.huecos.map((x) => (x.id === huecoId ? { ...x, asistencia: a } : x)),
-      pacientes: a === 'no_asistio' ? d.pacientes.map((x) => (x.id === h.ocupadoPor ? nuevoCiclo(x, 'no_asistio', h.fecha) : x)) : d.pacientes,
-    }));
+  const marcarAsistencia = async (huecoId: string, a: 'asistio' | 'no_asistio') => {
+    const h = await intentar(() => api.asistencia(huecoId, a));
+    if (!h) return;
+    ponerHueco(h);
+    await refrescarPaciente(h.ocupadoPor);
+    setAviso({ texto: a === 'asistio' ? 'Asistencia registrada' : 'Inasistencia registrada: vuelve a la regla 3-7-15' });
   };
 
-  const ofrecerHueco = (huecoId: string, pacienteId: string) =>
-    setDatos((d) => ({
-      ...d,
-      huecos: d.huecos.map((x) =>
-        x.id === huecoId && !x.ofertas.some((o) => o.pacienteId === pacienteId) ? { ...x, ofertas: [...x.ofertas, { pacienteId, fecha: hoy }] } : x
-      ),
-    }));
+  const ofrecerHueco = async (huecoId: string, pacienteId: string) => {
+    const h = await intentar(() => api.ofrecer(huecoId, pacienteId));
+    if (h) ponerHueco(h);
+  };
 
-  const rechazarOferta = (huecoId: string, pacienteId: string) =>
-    setDatos((d) => ({
-      ...d,
-      huecos: d.huecos.map((x) => (x.id === huecoId ? { ...x, ofertas: x.ofertas.map((o) => (o.pacienteId === pacienteId ? { ...o, rechazo: true } : o)) } : x)),
-    }));
+  const rechazarOferta = async (huecoId: string, pacienteId: string) => {
+    const h = await intentar(() => api.rechazar(huecoId, pacienteId));
+    if (h) ponerHueco(h);
+  };
 
-  const confirmarHueco = (huecoId: string) => {
-    setDatos((d) => ({ ...d, huecos: d.huecos.map((x) => (x.id === huecoId ? { ...x, confirmadoEl: hoy } : x)) }));
+  const confirmarHueco = async (huecoId: string) => {
+    const h = await intentar(() => api.confirmar(huecoId));
+    if (!h) return;
+    ponerHueco(h);
     setAviso({ texto: 'Cita confirmada', exito: true });
   };
 
-  const restaurar = () => {
-    if (!confirm('Se borrará lo registrado en el panel y se volverán a leer los 4 Excel de la clínica. ¿Continuar?')) return;
-    cargarDatosIniciales()
-      .then((d) => {
-        setDatos(d);
-        setPantalla(inicio);
-      })
-      .catch((e: Error) => setAviso({ texto: e.message }));
+  // relee los Excel desde la carpeta configurada en el backend (RUTA_DATOS_EXCEL); lo trabajado se conserva
+  const restaurar = async () => {
+    if (!confirm('Se volverán a leer los 4 Excel de la clínica desde la carpeta del servidor. Lo trabajado (contactos, notas, cupos) se conserva. ¿Continuar?')) return;
+    const r = await intentar(() => api.recargarExcel());
+    if (!r) return;
+    await intentar(recargar);
+    setAviso({ texto: `Excel releídos: ${r.total_pacientes} pacientes`, exito: true });
+    setPantalla(inicio);
   };
 
+  const configurar = async (cambios: { asesora?: string; fecha_corte?: string }) => {
+    setDatos((d) => ({ ...d, ...(cambios.asesora !== undefined && { asesora: cambios.asesora }), ...(cambios.fecha_corte && { fechaCorte: cambios.fecha_corte }) }));
+    await intentar(() => api.configurar(cambios));
+  };
+
+  // solo abre expedientes quien puede ver pacientes (campañas no ve expedientes clínicos)
   const abrirExpediente = (id: string) => {
+    if (!puedeVer(usuario.rol, 'pacientes')) return;
     setExpediente(id);
     setPantalla('pacientes');
   };
 
   // ---------- navegación: solo las secciones del rol ----------
   const enviando = campanas.find((c) => c.estado === 'enviando');
+  const esp = usuario.rol === 'especialista';
   const items = (
     [
-      { id: 'hoy', t: 'Hoy toca contactar', corto: 'Hoy', icono: Sparkles, rol: 'auxiliar', n: pacientes.filter((p) => tocaHoy(p, hoy)).length, nTxt: 'por contactar' },
-      { id: 'pacientes', t: 'Pacientes', corto: 'Pacientes', icono: Users, rol: 'auxiliar' },
-      { id: 'cargar', t: 'Cargar agenda', corto: 'Cargar', icono: FileSpreadsheet, rol: 'auxiliar' },
-      { id: 'agenda', t: 'Agenda libre', corto: 'Agenda', icono: CalendarClock, rol: 'recepcion', n: huecos.filter((h) => h.fecha >= hoy && !h.ocupadoPor).length, nTxt: 'cupos libres' },
-      { id: 'campanas', t: 'Campañas', corto: 'Campañas', icono: Megaphone, rol: 'mercadeo' },
-      { id: 'indicadores', t: 'Indicadores', corto: 'Indicadores', icono: BarChart3, rol: 'direccion' },
-      { id: 'cuentas', t: 'Cuentas', corto: 'Cuentas', icono: UserCog, rol: 'direccion' },
+      { id: 'inicio', t: 'Inicio', corto: 'Inicio', icono: House },
+      { id: 'hoy', t: 'Hoy toca contactar', corto: 'Hoy', icono: Sparkles, grupo: 'Operación', n: pacientes.filter((p) => tocaHoy(p, hoy)).length, nTxt: 'por contactar' },
+      { id: 'pacientes', t: esp ? 'Mis pacientes' : 'Pacientes', corto: 'Pacientes', icono: Users, grupo: 'Operación' },
+      { id: 'agenda', t: esp ? 'Mi agenda libre' : 'Agenda libre', corto: 'Agenda', icono: CalendarClock, grupo: 'Operación', n: vista.huecos.filter((h) => h.fecha >= hoy && !h.ocupadoPor).length, nTxt: 'cupos libres' },
+      { id: 'campanas', t: 'Campañas', corto: 'Campañas', icono: Megaphone, grupo: 'Operación' },
+      { id: 'cargar', t: 'Cargar agenda', corto: 'Cargar', icono: FileSpreadsheet, grupo: 'Operación' },
+      { id: 'indicadores', t: 'Indicadores', corto: 'Indicadores', icono: BarChart3, grupo: 'Gestión' },
+      { id: 'cuentas', t: 'Cuentas', corto: 'Cuentas', icono: UserCog, grupo: 'Gestión' },
     ] as Item[]
   ).filter((x) => puedeVer(usuario.rol, x.id));
   const ir = (p: Pantalla) => {
@@ -371,49 +318,51 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
         hoyReal={hoyISO()}
         asesora={datos.asesora}
         usuario={usuario}
-        whatsapp={apiConectada(config)}
-        onFecha={(f) => setDatos((d) => ({ ...d, fechaCorte: f }))}
-        onAsesora={(a) => setDatos((d) => ({ ...d, asesora: a }))}
-        onRestaurar={restaurar}
+        whatsapp={datos.whatsapp.conectado}
+        onFecha={(f) => configurar({ fecha_corte: f })}
+        onAsesora={(a) => configurar({ asesora: a })}
+        onRestaurar={puedeVer(usuario.rol, 'cargar') ? restaurar : undefined}
       />
 
       <main id="contenido" ref={principal} tabIndex={-1} aria-label={items.find((x) => x.id === pantalla)?.t} className="pb-24 outline-none lg:pb-0 lg:pl-[264px]">
         <div key={pantalla + (expediente ?? '')} className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-8 lg:px-12 lg:py-12">
-          {pantalla === 'hoy' && (
+          {!puedeVer(usuario.rol, pantalla) && <Vacio titulo="Esta sección no es de tu rol" texto="Vuelve a tu inicio para ver tus responsabilidades." />}
+          {pantalla === 'inicio' && <Inicio datos={vista} hoy={hoy} usuario={usuario} onIr={ir} onAbrir={abrirExpediente} />}
+          {pantalla === 'hoy' && puedeVer(usuario.rol, 'hoy') && (
             <Hoy pacientes={pacientes} hoy={hoy} onContactar={setContactando} onIrCargar={() => setPantalla('cargar')} onAbrir={abrirExpediente} />
           )}
-          {pantalla === 'pacientes' && (
+          {pantalla === 'pacientes' && puedeVer(usuario.rol, 'pacientes') && (
             <Pacientes
-              datos={datos}
+              datos={vista}
               hoy={hoy}
               abierto={expediente}
               onAbrir={setExpediente}
               onContactar={setContactando}
-              onNota={(id, texto) => cambiarPaciente(id, (p) => ({ ...p, notas: [...p.notas, { fecha: hoy, texto }] }))}
-              onReactivar={(id) =>
-                conDeshacer('Paciente reactivado: empieza un nuevo 3-7-15 hoy', (d) => ({
-                  ...d,
-                  pacientes: d.pacientes.map((p) => (p.id === id ? nuevoCiclo(p, p.caso, hoy) : p)),
-                }))
-              }
-              onDescartar={(id) =>
-                conDeshacer('Paciente sacado del seguimiento', (d) => ({
-                  ...d,
-                  pacientes: d.pacientes.map((p) => (p.id === id ? { ...p, estado: 'descartado' } : p)),
-                }))
-              }
-              onCrear={(p) => {
-                cambiarPacientes((ps) => [p, ...ps]);
+              onNota={async (id, texto) => {
+                if (await intentar(() => api.nota(id, texto)) !== undefined) await refrescarPaciente(id);
+              }}
+              onReactivar={async (id) => {
+                const act = await intentar(() => api.reactivar(id));
+                if (act) (ponerPaciente(act), setAviso({ texto: 'Paciente reactivado: empieza un nuevo 3-7-15 hoy' }));
+              }}
+              onDescartar={async (id) => {
+                const act = await intentar(() => api.descartar(id));
+                if (act) (ponerPaciente(act), setAviso({ texto: 'Paciente sacado del seguimiento' }));
+              }}
+              onCrear={async (nuevo) => {
+                const p = await intentar(() => api.crearPaciente(nuevo));
+                if (!p) return;
+                ponerPaciente(p);
                 setExpediente(p.id);
                 setAviso({ texto: `${p.nombre} agregado al seguimiento`, exito: true });
               }}
             />
           )}
-          {pantalla === "cargar" && <Cargar onAgregar={agregarDeExcel} />}
-          {pantalla === 'agenda' && (
+          {pantalla === 'cargar' && puedeVer(usuario.rol, 'cargar') && <Cargar onSubir={subirExcel} />}
+          {pantalla === 'agenda' && puedeVer(usuario.rol, 'agenda') && (
             <Agenda
-              pacientes={pacientes}
-              huecos={huecos}
+              pacientes={vista.pacientes}
+              huecos={vista.huecos}
               hoy={hoy}
               onAsignar={asignarHueco}
               onRevertir={revertirHueco}
@@ -424,26 +373,45 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
               asesora={datos.asesora}
               onReasignar={reasignar}
               onAbrir={abrirExpediente}
-              onAgregar={(h: Hueco) => setDatos((d) => ({ ...d, huecos: [...d.huecos, h] }))}
-              onBorrar={(id) => conDeshacer('Cupo eliminado', (d) => ({ ...d, huecos: d.huecos.filter((h) => h.id !== id) }))}
+              onAgregar={async (h: Hueco) => {
+                const nuevo = await intentar(() => api.crearCupo(h));
+                if (nuevo) ponerHueco(nuevo);
+              }}
+              onBorrar={async (id) => {
+                if ((await intentar(() => api.borrarCupo(id).then(() => true))) === undefined) return;
+                setDatos((d) => ({ ...d, huecos: d.huecos.filter((h) => h.id !== id) }));
+                setAviso({ texto: 'Cupo eliminado' });
+              }}
             />
           )}
-          {pantalla === 'campanas' && (
+          {pantalla === 'campanas' && puedeVer(usuario.rol, 'campanas') && (
             <Campanas
               pacientes={pacientes}
               campanas={campanas}
-              config={config}
-              onCrear={(c) => {
-                setDatos((d) => ({ ...d, campanas: [c, ...d.campanas] }));
+              whatsapp={datos.whatsapp}
+              onCrear={async (nueva) => {
+                const c = await intentar(() => api.crearCampana(nueva));
+                if (!c) return false;
+                ponerCampana(c);
                 setAviso({ texto: `Campaña “${c.nombre}” lista para enviarse`, exito: true });
+                return true;
               }}
-              onActualizar={actualizarCampana}
-              onBorrar={(id) => setDatos((d) => ({ ...d, campanas: d.campanas.filter((c) => c.id !== id) }))}
-              onConfig={(c: ConfigWA) => setDatos((d) => ({ ...d, config: c }))}
-              onAbrir={abrirExpediente}
+              onAccion={async (id, accion) => {
+                const c = await intentar(() => api.accionCampana(id, accion));
+                if (c) ponerCampana(c);
+              }}
+              onRespuesta={async (id, envio, respondio) => {
+                const c = await intentar(() => api.respuesta(id, envio, respondio));
+                if (c) ponerCampana(c);
+              }}
+              onBorrar={async (id) => {
+                if ((await intentar(() => api.borrarCampana(id).then(() => true))) === undefined) return;
+                setDatos((d) => ({ ...d, campanas: d.campanas.filter((c) => c.id !== id) }));
+              }}
+              onAbrir={puedeVer(usuario.rol, 'pacientes') ? abrirExpediente : undefined}
             />
           )}
-          {pantalla === 'indicadores' && <Indicadores datos={datos} hoy={hoy} />}
+          {pantalla === 'indicadores' && puedeVer(usuario.rol, 'indicadores') && <Indicadores datos={datos} hoy={hoy} />}
           {pantalla === 'cuentas' && puedeVer(usuario.rol, 'cuentas') && <Cuentas yo={usuario.id} onAviso={(texto) => setAviso({ texto })} />}
         </div>
       </main>

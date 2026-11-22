@@ -55,6 +55,7 @@ export interface Paciente {
   ciudad: string;
   segmento: Segmento;
   antiguedad: Antiguedad;
+  motivoVip?: string; // por qué es VIP (lo decide el backend, RN-08)
   etiquetas: string[]; // VIP, Valoración virtual, Rehabilitación, Alineadores, Convenio FLAIRES
   grupo: Grupo;
   fallosHistoricos: number; // todas las citas sin cumplir del historial
@@ -95,6 +96,7 @@ export interface Hueco {
 export type EstadoEnvio = 'pendiente' | 'enviado' | 'respondio' | 'fallo' | 'omitido';
 
 export interface Envio {
+  id?: string; // id del backend (para marcar la respuesta)
   pacienteId: string;
   nombre: string;
   telefono: string;
@@ -117,22 +119,16 @@ export interface Campana {
   envios: Envio[];
 }
 
-export interface ConfigWA {
-  token: string;
-  phoneId: string;
-  plantilla: string;
-  idioma: string;
-}
 
 export interface Datos {
   pacientes: Paciente[];
   citas: Cita[];
   huecos: Hueco[];
   campanas: Campana[];
-  config: ConfigWA;
+  whatsapp: { conectado: boolean; modo: string }; // estado del canal; el token vive en el .env del backend
   asesora: string; // quien firma los guiones: [ASESOR/A]
   fechaCorte: string; // fecha de trabajo: por defecto, el cierre de la agenda cargada
   archivos: string[];
 }
 
-export type Pantalla = 'hoy' | 'pacientes' | 'agenda' | 'campanas' | 'indicadores' | 'cargar' | 'cuentas';
+export type Pantalla = 'inicio' | 'hoy' | 'pacientes' | 'agenda' | 'campanas' | 'indicadores' | 'cargar' | 'cuentas';

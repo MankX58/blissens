@@ -11,7 +11,7 @@ export interface Item {
   t: string;
   corto: string; // etiqueta en la barra inferior del móvil
   icono: LucideIcon;
-  rol: Rol; // grupo del menú
+  grupo?: string; // solo gerencia, que ve todo, los separa en "Operación" y "Gestión"
   n?: number;
   nTxt?: string; // qué cuenta el número, para lectores de pantalla
 }
@@ -32,11 +32,11 @@ export function Navegacion(props: Props) {
   const [cajon, setCajon] = useState(false);
   const actual = items.find((x) => x.id === pantalla);
 
-  // barra inferior: hasta 4 secciones de uso diario, primero las propias del rol, en el orden del menú; el resto queda en "Menú"
-  const diarias = items.filter((x) => x.id !== 'cargar' && x.id !== 'cuentas');
+  // barra inferior: Inicio + hasta 3 secciones de uso diario, primero las propias del rol; el resto queda en "Menú"
+  const diarias = items.filter((x) => x.id !== 'inicio' && x.id !== 'cargar' && x.id !== 'cuentas');
   const propia = (x: Item) => ROL_DE[x.id].includes(usuario.rol);
-  const elegidas = [...diarias.filter(propia), ...diarias.filter((x) => !propia(x))].slice(0, 4);
-  const abajo = items.filter((x) => elegidas.includes(x));
+  const elegidas = [...diarias.filter(propia), ...diarias.filter((x) => !propia(x))].slice(0, 3);
+  const abajo = items.filter((x) => x.id === 'inicio' || elegidas.includes(x));
 
   const ir = (p: Pantalla) => {
     setCajon(false);
@@ -77,8 +77,10 @@ export function Navegacion(props: Props) {
 }
 
 function Barra({ items, pantalla, onIr, usuario, hoy, enviando, onAjustes, onCerrar }: Props & { onCerrar?: () => void }) {
-  const grupos = (Object.keys(ROLES) as Rol[]).map((rol) => ({ rol, items: items.filter((x) => x.rol === rol) })).filter((g) => g.items.length);
-  const conTitulos = grupos.length > 1; // con un solo rol los títulos de grupo sobran
+  // Inicio arriba y sin título; los títulos de grupo solo aparecen si hay más de un grupo (gerencia)
+  const nombres = [...new Set(items.map((x) => x.grupo))];
+  const conTitulos = nombres.filter(Boolean).length > 1;
+  const grupos = nombres.map((g, i) => ({ id: `grupo-${i}`, titulo: g, items: items.filter((x) => x.grupo === g) }));
 
   return (
     <div className="flex h-full flex-col bg-ink text-white">
@@ -99,11 +101,10 @@ function Barra({ items, pantalla, onIr, usuario, hoy, enviando, onAjustes, onCer
 
       <nav className="flex-1 overflow-y-auto px-3 pb-4" aria-label="Secciones">
         {grupos.map((g) => (
-          <div key={g.rol} role="group" aria-labelledby={conTitulos ? `grupo-${g.rol}` : undefined} className="mb-5 last:mb-0">
-            {conTitulos && (
-              <p id={`grupo-${g.rol}`} className="flex items-center gap-2 px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-[.14em] text-white/60">
-                <span className="size-1.5 rounded-full" style={{ background: ROLES[g.rol].color }} aria-hidden />
-                {ROLES[g.rol].nombre}
+          <div key={g.id} role="group" aria-labelledby={conTitulos && g.titulo ? g.id : undefined} className="mb-5 last:mb-0">
+            {conTitulos && g.titulo && (
+              <p id={g.id} className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-[.14em] text-white/60">
+                {g.titulo}
               </p>
             )}
             <ul className="space-y-0.5">
@@ -245,7 +246,7 @@ export function Ajustes({
   whatsapp: boolean;
   onFecha: (f: string) => void;
   onAsesora: (a: string) => void;
-  onRestaurar: () => void;
+  onRestaurar?: () => void; // solo recepción relee los Excel
 }) {
   return (
     <Modal abierto={abierto} onCerrar={onCerrar} titulo="Ajustes" ancho="max-w-md">
@@ -275,9 +276,10 @@ export function Ajustes({
           <span className="block pl-4 text-xs text-muted">Se configura en Campañas.</span>
         </p>
 
+        {onRestaurar && (
         <div className="rounded-2xl bg-soft p-4">
           <p className="text-sm font-semibold">Volver a leer los Excel de la clínica</p>
-          <p className="mt-0.5 text-xs text-muted">Borra lo registrado en este navegador y carga de nuevo los 4 archivos.</p>
+          <p className="mt-0.5 text-xs text-muted">Relee los 4 archivos desde la carpeta del servidor. Lo trabajado (contactos, notas, cupos) se conserva.</p>
           <button
             onClick={() => {
               onCerrar();
@@ -288,6 +290,7 @@ export function Ajustes({
             Volver a leer
           </button>
         </div>
+        )}
 
         <p className="border-t border-line pt-4 text-xs text-muted">
           Sesión de <b className="font-semibold text-ink">{usuario.nombre}</b> ({usuario.email}) · {ROLES[usuario.rol].nombre}
