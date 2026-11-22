@@ -9,19 +9,18 @@ Cada persona entra a un **Inicio** propio: su foco del día, sus responsabilidad
 **Recepción y seguimiento** (auxiliar / recepcionista) · que ningún paciente quede sin reagendar ni ningún cupo vacío
 - **Hoy toca contactar**: lista del día por semáforo (rojo = 0 a 3 días, VIP o riesgo alto; amarillo = día 7; verde = día 15) y valor. En *Contactar* se elige el guion, se abre WhatsApp con el mensaje listo y se registran la respuesta y el motivo.
 - **Pacientes**: expediente con el proceso 3-7-15, historia completa (contactos, campañas, citas, notas, procesos anteriores), notas internas, reactivar o sacar del seguimiento y alta manual.
-- **Agenda libre**: cupos con pacientes sugeridos (mismo especialista, alto valor primero), ofertas, asignación con opción de revertir, confirmación 24 h antes y asistencia. Si no asiste, vuelve solo a la regla 3-7-15.
-- **Cargar agenda**: lee el Excel del software; las cancelaciones futuras se convierten en cupos de la agenda libre.
+- **Agenda libre**: el tiempo libre de los próximos 14 días se **calcula solo**: horario de cada especialista − descansos de la clínica − citas agendadas − vacaciones. Solo en días que ya tienen agenda abierta (al menos una cita): un día vacío lejano o festivo no se ofrece como libre. No hay que revisar cada cupo: la agenda avisa si el Excel tiene más de un día (una carga diaria pone todo al día) y, si al agendar en el software un horario ya estaba tomado, se marca «ya estaba ocupado» (se puede deshacer). La agenda puede **actualizarse sola** desde un archivo en línea (Google Sheets, Drive, OneDrive o SharePoint: gerencia pega el enlace en *Cargar agenda*), desde la base de datos del software (configurada en el `.env` del backend) o desde una carpeta sincronizada. Cada cupo trae pacientes sugeridos (mismo especialista, alto valor primero), ofertas, asignación con opción de revertir, confirmación 24 h antes y asistencia. Si no asiste, vuelve solo a la regla 3-7-15. Recepción puede agregar un cupo a mano para lo que el cálculo aún no ve.
+- **Campañas**: cuando el 3-7-15 no funcionó, el siguiente paso es una campaña de WhatsApp por segmento (sin respuesta tras 3-7-15, diagnóstico sin tratamiento, pausa, FLAIRES…) con mensaje personalizado, envío ahora o programado. Sin conexión, modo simulación; con WhatsApp Business Cloud API salen de verdad. Es la misma persona y el mismo canal que el seguimiento diario, por eso no es un rol aparte.
+- **Cargar agenda**: lee el Excel del software; las cancelaciones liberan su espacio en la agenda libre calculada.
 
 **Especialista** (Dra. Sara López, Dr. Juan Manuel Olarte) · que sus pacientes terminen el tratamiento
-- Ve **solo sus pacientes y sus cupos** (gerencia le asigna su agenda en *Cuentas*): tratamientos en pausa, diagnósticos sin iniciar, riesgo alto y a quién retomar primero. Deja notas para orientar a recepción.
-
-**Campañas de reactivación** · recuperar a quien el seguimiento diario no alcanzó
-- **Campañas**: audiencia por segmento (sin respuesta tras 3-7-15, diagnóstico sin tratamiento, pausa, FLAIRES…) + mensaje con variables + envío ahora o programado. Sin conexión, modo simulación; con WhatsApp Business Cloud API salen de verdad. No ve expedientes ni notas clínicas.
+- Ve **solo sus pacientes y su agenda libre** (gerencia le asigna su agenda en *Equipo*): tratamientos en pausa, diagnósticos sin iniciar, riesgo alto y a quién retomar primero. Deja notas para orientar a recepción.
+- **No contacta ni crea cupos**: su tiempo libre sale de su horario y sus citas, y recepción es quien escribe y agenda. Así no se duplica el trabajo ni aparecen cupos que nadie verificó.
 
 **Gerencia** · decidir con datos
-- Inicio con KPIs (por recuperar, dinero detenido, recuperados, tasa de recuperación) y el avance de cada área. Entra a todas las secciones.
+- Inicio con KPIs (por recuperar, dinero detenido, recuperados, tasa de recuperación) y el avance de cada área. Entra a todas las secciones; en Campañas decide a qué segmentos apuntar y revisa la respuesta.
 - **Indicadores**: fricción, motivos, efectividad por intento, segmentos, agenda libre y campañas; tablas descargables en Excel.
-- **Cuentas**: crear cuentas, asignar rol (y agenda a especialistas), desactivar; cuadro de qué ve cada rol.
+- **Equipo**: crear y editar cuentas (nombre, correo, contraseña), asignar rol y agenda, desactivar; **horario** de cada especialista (con un horario **sugerido** a partir de las citas cargadas), **descansos** de la clínica (almuerzo, pausas) y **vacaciones** por rango de fechas. De ahí sale la agenda libre.
 
 ## Arquitectura
 

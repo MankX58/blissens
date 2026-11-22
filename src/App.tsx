@@ -280,7 +280,7 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
       { id: 'campanas', t: 'Campañas', corto: 'Campañas', icono: Megaphone, grupo: 'Operación' },
       { id: 'cargar', t: 'Cargar agenda', corto: 'Cargar', icono: FileSpreadsheet, grupo: 'Operación' },
       { id: 'indicadores', t: 'Indicadores', corto: 'Indicadores', icono: BarChart3, grupo: 'Gestión' },
-      { id: 'cuentas', t: 'Cuentas', corto: 'Cuentas', icono: UserCog, grupo: 'Gestión' },
+      { id: 'cuentas', t: 'Equipo', corto: 'Equipo', icono: UserCog, grupo: 'Gestión' },
     ] as Item[]
   ).filter((x) => puedeVer(usuario.rol, x.id));
   const ir = (p: Pantalla) => {
@@ -338,6 +338,7 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
               abierto={expediente}
               onAbrir={setExpediente}
               onContactar={setContactando}
+              soloLectura={esp}
               onNota={async (id, texto) => {
                 if (await intentar(() => api.nota(id, texto)) !== undefined) await refrescarPaciente(id);
               }}
@@ -358,7 +359,7 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
               }}
             />
           )}
-          {pantalla === 'cargar' && puedeVer(usuario.rol, 'cargar') && <Cargar onSubir={subirExcel} />}
+          {pantalla === 'cargar' && puedeVer(usuario.rol, 'cargar') && <Cargar onSubir={subirExcel} gerencia={usuario.rol === 'direccion'} onFuente={recargar} />}
           {pantalla === 'agenda' && puedeVer(usuario.rol, 'agenda') && (
             <Agenda
               pacientes={vista.pacientes}
@@ -373,6 +374,26 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
               asesora={datos.asesora}
               onReasignar={reasignar}
               onAbrir={abrirExpediente}
+              soloLectura={esp}
+              sinHora={datos.agendaSinHora}
+              sinHorario={datos.sinHorario}
+              agendaSinCitas={datos.agendaSinCitas}
+              cubiertaHasta={datos.agendaCubiertaHasta}
+              onRecargar={recargar}
+              ultimaCarga={datos.ultimaCarga}
+              onIrCargar={puedeVer(usuario.rol, 'cargar') ? () => setPantalla('cargar') : undefined}
+              ocupados={datos.cuposOcupados}
+              cargaAutomatica={datos.cargaAutomatica}
+              fuenteAgenda={datos.fuenteAgenda}
+              fuenteError={datos.fuenteError}
+              onVerificar={async (ids, libre) => {
+                if (!(await intentar(() => api.verificarCupos(ids, libre)))) return;
+                await recargar(); // el backend recalcula: el cupo sale (o vuelve) de la agenda
+                if (libre === false)
+                  setAviso({ texto: 'Marcado como ocupado: ya no se ofrecerá', deshacer: () => intentar(() => api.verificarCupos(ids, null)).then(recargar) });
+                else if (libre === null) setAviso({ texto: 'De vuelta en la agenda libre', exito: true });
+              }}
+              onIrHorarios={puedeVer(usuario.rol, 'cuentas') ? () => setPantalla('cuentas') : undefined}
               onAgregar={async (h: Hueco) => {
                 const nuevo = await intentar(() => api.crearCupo(h));
                 if (nuevo) ponerHueco(nuevo);
@@ -412,7 +433,7 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
             />
           )}
           {pantalla === 'indicadores' && puedeVer(usuario.rol, 'indicadores') && <Indicadores datos={datos} hoy={hoy} />}
-          {pantalla === 'cuentas' && puedeVer(usuario.rol, 'cuentas') && <Cuentas yo={usuario.id} onAviso={(texto) => setAviso({ texto })} />}
+          {pantalla === 'cuentas' && puedeVer(usuario.rol, 'cuentas') && <Cuentas yo={usuario.id} hoy={hoy} onAviso={(texto) => setAviso({ texto })} onEquipo={recargar} />}
         </div>
       </main>
 

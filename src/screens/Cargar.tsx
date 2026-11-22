@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
-import { Check, FileSpreadsheet, Upload, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Check, Cloud, CloudOff, FileSpreadsheet, Link2, RefreshCw, Upload, X } from 'lucide-react';
 import { TIPO_TXT, leerHoja, procesar, tipoDe, type Carga, type TipoArchivo } from '../lib/excel';
 import { GRUPO_TXT, pesosCorto } from '../lib/reglas';
-import type { Grupo } from '../types';
-import { Cifra, Encabezado, btnBorde, btnNegro } from '../components/ui';
+import type { FuenteAgenda, Grupo } from '../types';
+import { api } from '../lib/api';
+import { haceTexto, horasDesdeCarga } from './Agenda';
+import { Cifra, Encabezado, btnBorde, btnChico, btnNegro } from '../components/ui';
 
 type Entrada = { nombre: string; filas: Record<string, unknown>[]; tipo: TipoArchivo; archivo: File };
 const ESPERADOS: TipoArchivo[] = ['historial', 'detalle', 'arancel', 'guiones'];
@@ -18,7 +20,7 @@ const AYUDA: Record<TipoArchivo, string> = {
 type Archivos = { historial: File; detalle?: File; arancel?: File; guiones?: File };
 
 // Vista previa en el navegador; al confirmar, los archivos van al ETL del backend, que conserva lo trabajado
-export function Cargar({ onSubir }: { onSubir: (a: Archivos) => Promise<boolean> }) {
+export function Cargar({ onSubir, gerencia = false, onFuente }: { onSubir: (a: Archivos) => Promise<boolean>; gerencia?: boolean; onFuente: () => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [arrastrando, setArrastrando] = useState(false);
   const [leyendo, setLeyendo] = useState(false);
@@ -68,6 +70,7 @@ export function Cargar({ onSubir }: { onSubir: (a: Archivos) => Promise<boolean>
         titulo="Carga la agenda del software"
         descripcion="Sube los Excel tal como salen del software (puedes soltar los 4 a la vez). El panel cruza las dos agendas por # Cita y # Paciente, agrupa las citas de cada paciente, lo clasifica en los 4 segmentos del SRS y estima su valor con el arancel."
       />
+      <EnLinea gerencia={gerencia} onCambio={onFuente} />
 
       <div
         onDragOver={(e) => {
@@ -211,5 +214,134 @@ function Dato({ k, v }: { k: string; v: number }) {
       </dd>
       <dt className="mt-2 text-xs text-muted">{k}</dt>
     </div>
+  );
+}
+
+// ---------- agenda en línea: el panel la descarga solo y la revisa cada pocos minutos ----------
+const FUENTE_TXT = {
+  enlace: 'Conectada a un archivo en línea',
+  base: 'Conectada a la base de datos del software',
+  carpeta: 'Se carga sola desde la carpeta de la agenda',
+} as const;
+
+function EnLinea({ gerencia, onCambio }: { gerencia: boolean; onCambio: () => void }) {
+  const [f, setF] = useState<FuenteAgenda | null>(null);
+  const [editando, setEditando] = useState(false);
+  const [form, setForm] = useState({ enlace: '', detalle: '' });
+  const [ocupado, setOcupado] = useState<'' | 'probando' | 'revisando'>('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    api.fuente().then(setF).catch(() => setF(null));
+  }, []);
+  if (!f) return null;
+
+  const abrir = () => {
+    setForm({ enlace: f.enlace, detalle: f.enlaceDetalle });
+    setError('');
+    setEditando(true);
+  };
+  const guardar = async (enlace: string, detalle: string) => {
+    setOcupado('probando');
+    setError('');
+    try {
+      setF(await api.guardarFuente(enlace.trim(), detalle.trim()));
+      setEditando(false);
+      onCambio();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+    setOcupado('');
+  };
+  const revisar = async () => {
+    setOcupado('revisando');
+    try {
+      setF(await api.actualizarFuente());
+      onCambio();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+    setOcupado('');
+  };
+  const revisada = f.ultimaRevision ? haceTexto(horasDesdeCarga(f.ultimaRevision)) : '';
+
+  return (
+    <section className="entrar card mt-6 overflow-hidden" aria-labelledby="t-linea">
+      <div className="flex flex-wrap items-center gap-4 p-5 sm:p-6">
+        <span className={`grid size-11 shrink-0 place-items-center rounded-2xl ${f.tipo ? (f.error ? 'bg-rojo/10 text-rojo' : 'bg-verde/12 text-verde') : 'bg-soft text-ink/50'}`}>
+          {f.tipo ? <Cloud className="size-5" aria-hidden /> : <CloudOff className="size-5" aria-hidden />}
+        </span>
+        <div className="min-w-[15rem] flex-1">
+          <h2 id="t-linea" className="font-semibold">
+            {f.tipo ? FUENTE_TXT[f.tipo] : 'Agenda en línea'}
+          </h2>
+          <p className="text-sm text-muted">
+            {f.tipo
+              ? f.tipo === 'carpeta'
+                ? 'Cuando llega una exportación nueva a la carpeta, el panel la carga al abrirse.'
+                : `Se revisa sola cada ${f.cadaMin} min y solo se recarga si cambió${revisada ? ` · última revisión ${revisada}` : ''}.`
+              : 'Conecta el Excel de la agenda en línea y el panel se mantendrá al día solo, sin subir archivos.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {f.tipo && (
+            <button onClick={revisar} disabled={!!ocupado} className={btnBorde}>
+              <RefreshCw className={`size-4 ${ocupado === 'revisando' ? 'animate-spin' : ''}`} aria-hidden /> {ocupado === 'revisando' ? 'Revisando…' : 'Actualizar ahora'}
+            </button>
+          )}
+          {gerencia && f.tipo !== 'base' && !editando && (
+            <button onClick={abrir} className={f.tipo === 'enlace' ? btnBorde : btnNegro}>
+              <Link2 className="size-4" aria-hidden /> {f.tipo === 'enlace' ? 'Cambiar enlace' : 'Conectar archivo en línea'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {f.error && !editando && (
+        <p className="flex items-start gap-2 border-t border-line bg-rojo/[.06] px-5 py-3 text-sm text-rojo sm:px-6">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden /> {f.error} Mientras tanto, el panel sigue con la última agenda que sí se cargó.
+        </p>
+      )}
+
+      {editando && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            guardar(form.enlace, form.detalle);
+          }}
+          className="hoja space-y-3 border-t border-line bg-soft/50 p-5 sm:p-6"
+        >
+          <label className="block text-sm font-medium">
+            Enlace de la agenda <span className="font-normal text-muted">(citas y estados)</span>
+            <input type="url" required placeholder="https://docs.google.com/spreadsheets/d/…" value={form.enlace} onChange={(e) => setForm({ ...form, enlace: e.target.value })} className="field mt-1" />
+          </label>
+          <label className="block text-sm font-medium">
+            Enlace del detalle con la hora de cada cita <span className="font-normal text-muted">(opcional, para calcular la agenda libre)</span>
+            <input type="url" placeholder="https://…" value={form.detalle} onChange={(e) => setForm({ ...form, detalle: e.target.value })} className="field mt-1" />
+          </label>
+          <p className="text-xs leading-relaxed text-muted">
+            Sirve un Excel en <b>Google Sheets</b>, <b>Google Drive</b>, <b>OneDrive o SharePoint</b>, compartido como «cualquiera con el enlace». Pega el enlace tal cual: el panel lo
+            convierte en descarga, lo prueba antes de guardarlo y lo revisa cada pocos minutos. Si el software de la clínica actualiza ese archivo, la agenda se mantiene al día sola.
+          </p>
+          {error && <p className="rounded-2xl bg-rojo/10 px-3 py-2 text-sm text-rojo">{error}</p>}
+          <div className="flex flex-wrap justify-between gap-2">
+            {f.tipo === 'enlace' ? (
+              <button type="button" onClick={() => confirm('La agenda dejará de actualizarse sola. ¿Desconectar el archivo en línea?') && guardar('', '')} className={`${btnChico} text-muted hover:text-rojo`}>
+                Desconectar
+              </button>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setEditando(false)} className={btnBorde}>
+                Cancelar
+              </button>
+              <button type="submit" disabled={!!ocupado} className={btnNegro}>
+                {ocupado === 'probando' ? 'Probando el enlace…' : 'Probar y conectar'}
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
+    </section>
   );
 }

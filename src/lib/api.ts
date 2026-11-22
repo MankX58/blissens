@@ -1,6 +1,6 @@
 // Cliente del backend FastAPI (../blissens-backend). Vite pasa /api a :8000 con la cookie de sesión de Better Auth.
 // El backend es la fuente de verdad: aquí solo se traducen sus respuestas (snake_case) al modelo del panel (src/types.ts).
-import type { Campana, Caso, Cita, Contacto, Datos, Estado, EstadoEnvio, Grupo, Hueco, Motivo, NivelRiesgo, Paciente, Profesional, Resultado, Segmento } from '../types';
+import type { Campana, Caso, Cita, Contacto, Datos, Equipo, FuenteAgenda, Estado, EstadoEnvio, Franja, Grupo, Hueco, Motivo, NivelRiesgo, Paciente, Pausa, Profesional, Resultado, Segmento } from '../types';
 
 const BASE = '/api/v1';
 
@@ -94,6 +94,8 @@ interface ApiHueco {
   hora: string;
   minutos: number;
   profesional: string;
+  origen?: 'calculado' | 'manual';
+  verificacion?: 'libre' | 'ocupado' | null;
   ocupado_por: number | null;
   asignado_el: string | null;
   estado_previo: string | null;
@@ -121,6 +123,20 @@ export interface ApiPanel {
   pacientes: ApiPaciente[];
   huecos: ApiHueco[];
   campanas: ApiCampana[];
+  agenda_sin_hora?: { fecha: string; profesional: string; citas: number }[];
+  sin_horario?: string[];
+  agenda_sin_citas?: number;
+  agenda_cubierta_hasta?: string | null;
+  ultima_carga?: string | null;
+  carga_automatica?: boolean;
+  fuente_agenda?: FuenteAgenda['tipo'];
+  fuente_error?: string | null;
+  cupos_ocupados?: ApiHueco[];
+}
+interface ApiEquipo {
+  horarios: { profesional: string; franjas: { dia_semana: number; inicio: string; fin: string }[] }[];
+  pausas: Pausa[];
+  ausencias: { id: number; user_id: string; nombre: string; desde: string; hasta: string; motivo: string }[];
 }
 
 // ---------- traducción al modelo del panel ----------
@@ -202,6 +218,8 @@ export const adaptarHueco = (h: ApiHueco): Hueco => ({
   hora: h.hora,
   minutos: h.minutos,
   especialista: h.profesional as Profesional,
+  origen: h.origen ?? 'manual',
+  verificacion: h.verificacion ?? undefined,
   ocupadoPor: h.ocupado_por != null ? String(h.ocupado_por) : undefined,
   asignadoEl: h.asignado_el ?? undefined,
   estadoPrevio: (h.estado_previo as Estado | null) ?? undefined,
@@ -241,6 +259,38 @@ export const adaptarPanel = (p: ApiPanel): Datos => ({
   asesora: p.configuracion.asesora,
   fechaCorte: p.configuracion.fecha_corte,
   archivos: [],
+  agendaSinHora: (p.agenda_sin_hora ?? []).map((d) => ({ ...d, profesional: d.profesional as Profesional })),
+  sinHorario: (p.sin_horario ?? []) as Profesional[],
+  agendaSinCitas: p.agenda_sin_citas ?? 0,
+  agendaCubiertaHasta: p.agenda_cubierta_hasta ?? undefined,
+  ultimaCarga: p.ultima_carga ? utc(p.ultima_carga) : undefined,
+  cargaAutomatica: !!p.carga_automatica,
+  fuenteAgenda: p.fuente_agenda ?? null,
+  fuenteError: p.fuente_error ?? undefined,
+  cuposOcupados: (p.cupos_ocupados ?? []).map(adaptarHueco),
+});
+
+interface ApiFuente {
+  tipo: FuenteAgenda['tipo'];
+  enlace: string;
+  enlace_detalle: string;
+  revisar_cada_min: number;
+  ultima_revision: string | null;
+  error: string | null;
+}
+const adaptarFuente = (f: ApiFuente): FuenteAgenda => ({
+  tipo: f.tipo,
+  enlace: f.enlace,
+  enlaceDetalle: f.enlace_detalle,
+  cadaMin: f.revisar_cada_min,
+  ultimaRevision: f.ultima_revision ? utc(f.ultima_revision) : undefined,
+  error: f.error ?? undefined,
+});
+
+const adaptarEquipo = (e: ApiEquipo): Equipo => ({
+  horarios: Object.fromEntries(e.horarios.map((h) => [h.profesional, h.franjas.map((f) => ({ dia: f.dia_semana, inicio: f.inicio, fin: f.fin }))])) as Equipo['horarios'],
+  pausas: e.pausas,
+  ausencias: e.ausencias.map((a) => ({ id: String(a.id), userId: a.user_id, nombre: a.nombre, desde: a.desde, hasta: a.hasta, motivo: a.motivo })),
 });
 
 // ---------- endpoints ----------
@@ -258,6 +308,22 @@ export interface NuevaCampana {
 export const api = {
   panel: () => pedir<ApiPanel>('/panel').then(adaptarPanel),
   configurar: (cambios: { asesora?: string; fecha_corte?: string }) => patch('/configuracion', cambios),
+
+  // equipo: horarios de especialistas, descansos de la clínica y vacaciones (solo gerencia escribe)
+  equipo: () => pedir<ApiEquipo>('/equipo').then(adaptarEquipo),
+  guardarHorario: (profesional: Profesional, franjas: Franja[]) =>
+    pedir('/equipo/horarios', { method: 'PUT', body: JSON.stringify({ profesional, franjas: franjas.map((f) => ({ dia_semana: f.dia, inicio: f.inicio, fin: f.fin })) }) }),
+  guardarPausas: (pausas: Pausa[]) => pedir('/equipo/pausas', { method: 'PUT', body: JSON.stringify(pausas) }),
+  registrarAusencia: (a: { userId: string; desde: string; hasta: string; motivo: string }) =>
+    post('/equipo/ausencias', { user_id: a.userId, desde: a.desde, hasta: a.hasta, motivo: a.motivo }),
+  borrarAusencia: (id: string) => pedir<void>(`/equipo/ausencias/${n(id)}`, { method: 'DELETE' }),
+  // horario y almuerzo deducidos de las citas cargadas (gerencia solo confirma)
+  horarioSugerido: () =>
+    pedir<{ horarios: ApiEquipo['horarios']; pausas: Pausa[]; citas_con_hora: number }>('/equipo/sugerido').then((s) => ({
+      horarios: adaptarEquipo({ horarios: s.horarios, pausas: [], ausencias: [] }).horarios,
+      pausas: s.pausas,
+      citas: s.citas_con_hora,
+    })),
 
   // pacientes y 3-7-15
   expediente: (id: string) => pedir<ApiPaciente>(`/pacientes/${n(id)}`).then(adaptarPaciente),
@@ -289,6 +355,9 @@ export const api = {
   asignar: (cupo: string, paciente: string) => post<ApiHueco>(`/agenda/huecos/${n(cupo)}/asignar`, { numero_paciente: n(paciente) }).then(adaptarHueco),
   revertir: (cupo: string) => post<ApiHueco>(`/agenda/huecos/${n(cupo)}/revertir`).then(adaptarHueco),
   confirmar: (cupo: string) => post<ApiHueco>(`/agenda/huecos/${n(cupo)}/confirmar`).then(adaptarHueco),
+  // recepción revisó en el software si el tiempo calculado sigue libre
+  // libre: true = sigue libre · false = ya estaba ocupado · null = deshacer la marca
+  verificarCupos: (ids: string[], libre: boolean | null) => post<ApiHueco[]>('/agenda/huecos/verificar', { ids: ids.map(n), libre }).then((r) => r.map(adaptarHueco)),
   asistencia: (cupo: string, asistencia: 'asistio' | 'no_asistio') => post<ApiHueco>(`/agenda/huecos/${n(cupo)}/asistencia`, { asistencia }).then(adaptarHueco),
 
   // campañas (el backend envía por WhatsApp; el token vive en su .env)
@@ -317,5 +386,10 @@ export const api = {
     if (archivos.guiones) f.append('guiones', archivos.guiones);
     return pedir<{ total_pacientes: number; total_citas: number }>('/ingesta/cargar-archivos', { method: 'POST', body: f });
   },
+  // agenda en línea: enlace (lo conecta gerencia), base de datos o carpeta; se actualiza sola
+  fuente: () => pedir<ApiFuente>('/ingesta/fuente').then(adaptarFuente),
+  guardarFuente: (enlace: string, enlaceDetalle: string) =>
+    pedir<ApiFuente>('/ingesta/fuente', { method: 'PUT', body: JSON.stringify({ enlace, enlace_detalle: enlaceDetalle }) }).then(adaptarFuente),
+  actualizarFuente: () => post<ApiFuente>('/ingesta/fuente/actualizar').then(adaptarFuente),
   recargarExcel: () => post<{ total_pacientes: number; total_citas: number }>('/ingesta/cargar-desde-ruta'),
 };

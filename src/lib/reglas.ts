@@ -69,6 +69,44 @@ export function semaforo(p: Paciente, hoy: string): Semaforo | null {
   return 'amarillo';
 }
 
+// Cada paso de la regla 3-7-15 dicho como lo vive quien contacta
+export const PASO_TXT: Record<Paso, string> = { 3: '1.er mensaje', 7: '2.º mensaje', 15: 'Último mensaje' };
+
+// Qué significa cada color, igual en todas las pantallas: quiénes están ahí y qué hacer con ellos
+export const SEMAFORO_INFO: Record<Semaforo, { corto: string; quienes: string; hacer: string }> = {
+  rojo: {
+    corto: 'Contactar hoy, primero',
+    quienes: 'Cancelaron o faltaron hace 3 días o menos, o son VIP, o suelen faltar (riesgo alto).',
+    hacer: 'Contactarlos hoy, antes que a los demás.',
+  },
+  amarillo: {
+    corto: 'Toca el 2.º mensaje',
+    quienes: 'Pasaron de 4 a 14 días y todavía no han vuelto a agendar.',
+    hacer: 'Enviar el 2.º mensaje con otra propuesta de día u hora.',
+  },
+  verde: {
+    corto: 'Último intento',
+    quienes: 'Pasaron 15 días o más sin agendar, o les toca su control de limpieza.',
+    hacer: 'Último intento. Si no responde, pasa a las campañas de WhatsApp.',
+  },
+};
+
+// Por qué ESTE paciente tiene su color (la primera razón que aplica, en el mismo orden que la regla)
+export function porQueSemaforo(p: Paciente, hoy: string): string {
+  const color = semaforo(p, hoy);
+  const paso = pasoActual(p, hoy);
+  if (!color || !paso) return '';
+  const dias = diasEntre(p.fechaEvento, hoy);
+  const hace = dias <= 0 ? 'hoy' : `hace ${dias} ${dias === 1 ? 'día' : 'días'}`;
+  if (color === 'rojo') {
+    if (paso === 3) return `Pasó ${hace}: es el mejor momento para que vuelva`;
+    if (esVIP(p)) return `Es VIP (${(p.motivoVip ?? 'tratamiento de alto valor').toLowerCase()}): no se puede perder`;
+    return `Suele faltar: ${p.fallosSeguidos} citas seguidas sin asistir`;
+  }
+  if (color === 'verde') return p.caso === 'limpieza' ? 'Le toca su control de limpieza' : `Pasó ${hace} sin agendar: último intento`;
+  return `Pasó ${hace} sin agendar: toca el 2.º mensaje`;
+}
+
 export const tocaHoy = (p: Paciente, hoy: string) => {
   const f = fechaQueToca(p, hoy);
   return f !== null && f <= hoy;

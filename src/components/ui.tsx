@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { Estado, Paciente } from '../types';
-import { ESTADO_TXT, esVIP, fechaCorta, riesgoAlto, type Semaforo } from '../lib/reglas';
+import { ESTADO_TXT, SEMAFORO_INFO, esVIP, fechaCorta, riesgoAlto, type Semaforo } from '../lib/reglas';
 
 export const SEMAFORO_TXT: Record<Semaforo, string> = {
   rojo: 'Urgente',
@@ -92,10 +92,15 @@ export function ComoSePrioriza({ className = '' }: { className?: string }) {
       <div className="hoja mt-2 grid gap-4 rounded-2xl bg-soft p-4 leading-relaxed text-ink/80 sm:grid-cols-3">
         <div>
           <p className="font-semibold text-ink">1. Urgencia: cuándo contactar</p>
-          <ul className="mt-1.5 space-y-1">
-            <li className="flex gap-2"><Punto color="rojo" className="mt-1" /> <span><b>Urgente:</b> canceló o faltó hace 0 a 3 días, o es VIP, o tiene riesgo alto.</span></li>
-            <li className="flex gap-2"><Punto color="amarillo" className="mt-1" /> <span><b>Seguimiento:</b> 4 a 14 días (mensaje del día 7).</span></li>
-            <li className="flex gap-2"><Punto color="verde" className="mt-1" /> <span><b>Rescate:</b> 15 días o más, o control de limpieza.</span></li>
+          <ul className="mt-1.5 space-y-1.5">
+            {(['rojo', 'amarillo', 'verde'] as Semaforo[]).map((c) => (
+              <li key={c} className="flex gap-2">
+                <Punto color={c} className="mt-1" />
+                <span>
+                  <b>{SEMAFORO_TXT[c]}:</b> {SEMAFORO_INFO[c].quienes} <span className="text-muted">{SEMAFORO_INFO[c].hacer}</span>
+                </span>
+              </li>
+            ))}
           </ul>
         </div>
         <div>

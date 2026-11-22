@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowRightLeft, Check, ChevronDown, Clock, MessageCircle, Phone, Plus, RotateCcw, Search, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
-import type { Hueco, Paciente, Profesional } from '../types';
+import { AlertTriangle, ArrowRightLeft, Lock, CalendarSearch, Check, ChevronDown, Clock, FileSpreadsheet, MessageCircle, Phone, Plus, RotateCcw, Search, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
+import type { Datos, Franja, Hueco, Paciente, Pausa, Profesional } from '../types';
+import { api } from '../lib/api';
+import { resumenHorario } from './Cuentas';
 import { fechaLarga, guionHueco, horaLarga, oficial, rellenar, N_UBICACION } from '../lib/guiones';
 import { CASO_TXT, ESPECIALISTAS, ESTADO_TXT, esVIP, diasEntre, fechaCorta, linkWhatsApp, pesosCorto, riesgoAlto, sumarDias } from '../lib/reglas';
 import { Encabezado, Etiqueta, Iniciales, InsigniaRiesgo, Insignias, Vacio, btnBorde, btnChico, btnNegro } from '../components/ui';
 
 // ---------- estado de cada cupo: dice qué hay que hacer con él ----------
-export type EstadoEspacio = 'libre' | 'ofrecido' | 'asignado' | 'confirmar' | 'confirmado' | 'asistencia' | 'asistio' | 'no_asistio' | 'perdido';
+export type EstadoEspacio = 'ocupado' | 'libre' | 'ofrecido' | 'asignado' | 'confirmar' | 'confirmado' | 'asistencia' | 'asistio' | 'no_asistio' | 'perdido';
 
 const INFO: Record<EstadoEspacio, { t: string; cls: string }> = {
+  ocupado: { t: 'Ocupado', cls: 'bg-ink/10 text-ink/60' },
   libre: { t: 'Por llenar', cls: 'bg-rojo/10 text-rojo' },
   ofrecido: { t: 'Esperando respuesta', cls: 'bg-amarillo/15 text-amarillo' },
   asignado: { t: 'Asignado', cls: 'bg-soft text-ink/70' },
@@ -21,6 +24,7 @@ const INFO: Record<EstadoEspacio, { t: string; cls: string }> = {
 };
 
 export function estadoDe(h: Hueco, hoy: string): EstadoEspacio {
+  if (h.verificacion === 'ocupado') return 'ocupado'; // al agendarlo, ya estaba tomado en el software
   if (h.asistencia) return h.asistencia;
   if (h.ocupadoPor) {
     if (h.fecha <= hoy) return 'asistencia';
@@ -33,6 +37,13 @@ export function estadoDe(h: Hueco, hoy: string): EstadoEspacio {
 const resuelto = (e: EstadoEspacio) => e === 'asistio' || e === 'no_asistio' || e === 'perdido';
 const PRIORIDAD: EstadoEspacio[] = ['asistencia', 'confirmar', 'ofrecido', 'libre', 'asignado', 'confirmado'];
 
+// qué tan vieja está la agenda cargada: lo agendado después de la última carga no aparece en el cálculo
+export const horasDesdeCarga = (iso?: string) => (iso ? (Date.now() - Date.parse(iso)) / 36e5 : Infinity);
+export const AGENDA_VIEJA_H = 24;
+export const haceTexto = (h: number) =>
+  h < 1 ? 'hace menos de una hora' : h < 24 ? `hace ${Math.round(h)} h` : `hace ${Math.floor(h / 24)} ${Math.floor(h / 24) === 1 ? 'día' : 'días'}`;
+
+const clave = (h: Hueco) => `${h.fecha}|${h.hora}|${h.especialista}`;
 const dr = (e: Profesional) => (e === 'Dra. Sara López' ? 'Dra. Sara' : 'Dr. Olarte');
 const horaFin = (h: Hueco) => {
   const [hh, mm] = h.hora.split(':').map(Number);
@@ -96,6 +107,20 @@ interface Props {
   onAbrir: (id: string) => void;
   onAgregar: (h: Hueco) => void;
   onBorrar: (id: string) => void;
+  soloLectura?: boolean; // especialista: ve su tiempo libre; ofrecer y asignar es de recepción
+  sinHora: Datos['agendaSinHora'];
+  sinHorario: Profesional[];
+  onIrHorarios?: () => void; // gerencia: ir a definir horarios
+  onIrCargar?: () => void; // recepción y gerencia: cargar el Excel nuevo
+  ultimaCarga?: string;
+  onVerificar: (ids: string[], libre: boolean | null) => void;
+  ocupados: Hueco[]; // marcados como «ya estaba ocupado»
+  cargaAutomatica: boolean;
+  fuenteAgenda?: 'carpeta' | 'enlace' | 'base' | null;
+  fuenteError?: string;
+  onRecargar: () => void;
+  agendaSinCitas: number;
+  cubiertaHasta?: string;
 }
 
 export function Agenda(props: Props) {
@@ -105,16 +130,23 @@ export function Agenda(props: Props) {
   const detalle = useRef<HTMLDivElement>(null);
 
   const conEstado = useMemo(
-    () => huecos.map((h) => ({ h, e: estadoDe(h, hoy) })).sort((a, b) => (a.h.fecha + a.h.hora < b.h.fecha + b.h.hora ? -1 : 1)),
-    [huecos, hoy]
+    () =>
+      [...huecos, ...props.ocupados.filter((o) => !huecos.some((h) => h.id === o.id))]
+        .map((h) => ({ h, e: estadoDe(h, hoy) }))
+        .sort((a, b) => (a.h.fecha + a.h.hora < b.h.fecha + b.h.hora ? -1 : 1)),
+    [huecos, props.ocupados, hoy]
   );
   const activos = conEstado.filter((x) => !resuelto(x.e));
   const pasados = conEstado.filter((x) => resuelto(x.e)).reverse();
   const n = (e: EstadoEspacio) => conEstado.filter((x) => x.e === e).length;
 
-  const primeroCon = (estados: EstadoEspacio[]) => conEstado.find((x) => estados.includes(x.e))?.h.id;
-  const [sel, setSel] = useState<string | undefined>(() => PRIORIDAD.map((e) => primeroCon([e])).find(Boolean) ?? conEstado[0]?.h.id);
-  const elegido = conEstado.find((x) => x.h.id === sel) ?? activos[0];
+  // se elige por fecha+hora+especialista: al marcar o desmarcar «ocupado» el cupo puede cambiar de id
+  const primeroCon = (estados: EstadoEspacio[]) => {
+    const x = conEstado.find((y) => estados.includes(y.e));
+    return x && clave(x.h);
+  };
+  const [sel, setSel] = useState<string | undefined>(() => PRIORIDAD.map((e) => primeroCon([e])).find(Boolean) ?? (conEstado[0] && clave(conEstado[0].h)));
+  const elegido = conEstado.find((x) => clave(x.h) === sel) ?? activos[0];
 
   const elegir = (id?: string) => {
     if (!id) return;
@@ -140,13 +172,21 @@ export function Agenda(props: Props) {
   return (
     <div>
       <Encabezado
-        titulo="Agenda libre"
-        descripcion="Los cupos que dejaron las cancelaciones. Elige uno, ofrécelo a los pacientes sugeridos, asígnalo cuando alguien acepte y confirma la cita un día antes."
+        titulo={props.soloLectura ? 'Mi agenda libre' : 'Agenda libre'}
+        descripcion={
+          props.soloLectura
+            ? 'Tu tiempo libre de los próximos 14 días, calculado con tu horario, los descansos de la clínica y tus citas. Recepción ofrece estos cupos a tus pacientes pendientes.'
+            : 'El tiempo libre de cada especialista en los próximos 14 días: su horario menos los descansos, las citas agendadas y sus vacaciones. Elige un cupo, ofrécelo y confírmalo un día antes.'
+        }
       >
-        <button onClick={() => setForm((v) => !v)} className={btnNegro}>
-          <Plus className="size-4" /> Nuevo cupo
-        </button>
+        {!props.soloLectura && (
+          <button onClick={() => setForm((v) => !v)} className={btnBorde} title="Para una cancelación que aún no llega en el Excel">
+            <Plus className="size-4" /> Agregar cupo a mano
+          </button>
+        )}
       </Encabezado>
+
+      <Avisos {...props} />
 
       {form && (
         <NuevoEspacio
@@ -155,7 +195,7 @@ export function Agenda(props: Props) {
           onGuardar={(h) => {
             props.onAgregar(h);
             setForm(false);
-            setSel(h.id);
+            setSel(clave(h));
           }}
         />
       )}
@@ -163,9 +203,10 @@ export function Agenda(props: Props) {
       {/* lista de tareas del día */}
       <section className="mt-8">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="kicker">Tu lista de hoy</h2>
+          <h2 className="kicker">{props.soloLectura ? 'Cómo va tu agenda' : 'Tu lista de hoy'}</h2>
           <p className="text-xs text-muted">
             {horas.toFixed(1).replace('.', ',')} h de sillón recuperadas · {pesosCorto(valor)} en tratamientos agendados · {n('perdido')} cupos perdidos
+            {n('ocupado') > 0 && ` · ${n('ocupado')} ${n('ocupado') === 1 ? 'marcado' : 'marcados'} como ocupado`}
           </p>
         </div>
         <div className="escalonado mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -184,7 +225,7 @@ export function Agenda(props: Props) {
                   {c ? <span className="num text-2xl font-bold">{c}</span> : <Check className="size-4 text-verde" />}
                 </span>
                 <span className={`mt-3 block text-sm font-semibold ${c ? '' : 'text-muted'}`}>{t.t}</span>
-                <span className={`block text-xs ${activo ? 'text-white/55' : 'text-muted'}`}>{c ? t.d : 'Todo al día'}</span>
+                <span className={`block text-xs ${activo ? 'text-white/55' : 'text-muted'}`}>{c ? (props.soloLectura ? 'Los gestiona recepción' : t.d) : 'Todo al día'}</span>
               </button>
             );
           })}
@@ -193,11 +234,16 @@ export function Agenda(props: Props) {
 
       {conEstado.length === 0 ? (
         <div className="mt-8">
-          <Vacio titulo="No hay cupos registrados" texto="Agrega los cupos que se liberaron en la agenda del software para empezar a llenarlos.">
-            <button onClick={() => setForm(true)} className={btnBorde}>
-              <Plus className="size-4" /> Nuevo cupo
-            </button>
-          </Vacio>
+          <Vacio
+            titulo="No hay tiempo libre por ahora"
+            texto={
+              props.sinHorario.length
+                ? 'El tiempo libre se calcula cuando gerencia define el horario de cada especialista.'
+                : props.agendaSinCitas
+                  ? 'Los próximos días aún no tienen citas en la agenda cargada, así que no hay huecos que llenar todavía.'
+                  : 'La agenda de los próximos 14 días está llena o no hay horario de atención esos días.'
+            }
+          />
         </div>
       ) : (
         <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[300px_1fr]">
@@ -207,7 +253,7 @@ export function Agenda(props: Props) {
               <div key={fecha} className="mb-2">
                 <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[.14em] text-muted">{nombreDia(fecha, hoy)}</p>
                 {lista.map(({ h, e }) => (
-                  <ItemEspacio key={h.id} h={h} e={e} activo={elegido?.h.id === h.id} paciente={pacientes.find((p) => p.id === h.ocupadoPor)} onClick={() => elegir(h.id)} />
+                  <ItemEspacio key={h.id} h={h} e={e} activo={elegido?.h.id === h.id} paciente={pacientes.find((p) => p.id === h.ocupadoPor)} onClick={() => elegir(clave(h))} />
                 ))}
               </div>
             ))}
@@ -220,14 +266,14 @@ export function Agenda(props: Props) {
                 </button>
                 {historial &&
                   pasados.map(({ h, e }) => (
-                    <ItemEspacio key={h.id} h={h} e={e} activo={elegido?.h.id === h.id} paciente={pacientes.find((p) => p.id === h.ocupadoPor)} onClick={() => elegir(h.id)} conFecha />
+                    <ItemEspacio key={h.id} h={h} e={e} activo={elegido?.h.id === h.id} paciente={pacientes.find((p) => p.id === h.ocupadoPor)} onClick={() => elegir(clave(h))} conFecha />
                   ))}
               </div>
             )}
           </aside>
 
           <div ref={detalle} className="min-w-0 scroll-mt-20">
-            {elegido ? <Detalle key={elegido.h.id} h={elegido.h} e={elegido.e} {...props} /> : <Vacio titulo="Elige un cupo" texto="Selecciona un cupo de la lista para ver qué hacer con él." />}
+            {elegido ? <Detalle key={clave(elegido.h) + elegido.e} h={elegido.h} e={elegido.e} {...props} /> : <Vacio titulo="Elige un cupo" texto="Selecciona un cupo de la lista para ver qué hacer con él." />}
           </div>
         </div>
       )}
@@ -236,17 +282,26 @@ export function Agenda(props: Props) {
 }
 
 function ItemEspacio({ h, e, activo, paciente, onClick, conFecha }: { h: Hueco; e: EstadoEspacio; activo: boolean; paciente?: Paciente; onClick: () => void; conFecha?: boolean }) {
+  const ocupado = e === 'ocupado';
   return (
-    <button onClick={onClick} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left ${activo ? 'bg-ink text-white' : 'hover:bg-soft'}`}>
+    <button
+      onClick={onClick}
+      className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors ${activo ? (ocupado ? 'bg-ink/75 text-white' : 'bg-ink text-white') : ocupado ? 'rayado text-ink/50 hover:bg-soft' : 'hover:bg-soft'}`}
+    >
       <span className="w-12 shrink-0">
-        <span className="num block text-[15px] font-bold leading-none">{h.hora}</span>
+        <span className={`num block text-[15px] font-bold leading-none ${ocupado ? 'line-through decoration-2' : ''}`}>{h.hora}</span>
         <span className={`text-[11px] ${activo ? 'text-white/50' : 'text-muted'}`}>{conFecha ? fechaCorta(h.fecha) : `${h.minutos} min`}</span>
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{paciente ? paciente.nombre : dr(h.especialista)}</span>
-        <span className={`block truncate text-[11px] ${activo ? 'text-white/50' : 'text-muted'}`}>{paciente ? dr(h.especialista) : h.ofertas.length ? `Ofrecido a ${h.ofertas.length}` : 'Sin ofrecer'}</span>
+        <span className={`block truncate text-[11px] ${activo ? 'text-white/50' : 'text-muted'}`}>
+          {ocupado ? 'Ya estaba tomado en el software' : paciente ? dr(h.especialista) : h.ofertas.length ? `Ofrecido a ${h.ofertas.length}` : 'Sin ofrecer'}
+        </span>
       </span>
-      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${activo ? 'bg-white/15 text-white' : INFO[e].cls}`}>{INFO[e].t}</span>
+      <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${activo ? 'bg-white/15 text-white' : INFO[e].cls}`}>
+        {ocupado && <Lock className="size-3" aria-hidden />}
+        {INFO[e].t}
+      </span>
     </button>
   );
 }
@@ -256,7 +311,9 @@ const PASOS_FLUJO = ['Ofrecer', 'Asignar', 'Confirmar', 'Asistencia'];
 const pasoDe = (e: EstadoEspacio) => (e === 'libre' ? 0 : e === 'ofrecido' ? 1 : e === 'asignado' || e === 'confirmar' ? 2 : e === 'confirmado' || e === 'asistencia' ? 3 : 4);
 
 function Detalle({ h, e, ...p }: Props & { h: Hueco; e: EstadoEspacio }) {
+  if (e === 'ocupado') return <Ocupado h={h} {...p} />;
   const paciente = p.pacientes.find((x) => x.id === h.ocupadoPor);
+  const puedeBloquear = !p.soloLectura && h.origen === 'calculado' && !h.ocupadoPor && (e === 'libre' || e === 'ofrecido');
   const paso = pasoDe(e);
   return (
     <div className="space-y-4">
@@ -269,12 +326,22 @@ function Detalle({ h, e, ...p }: Props & { h: Hueco; e: EstadoEspacio }) {
               {h.hora} <span className="text-white/60">–</span> {horaFin(h)}
             </p>
             <p className="mt-1 text-sm text-white/70">
-              {h.especialista} · {h.minutos} min · Consultorio 1157
+              {h.especialista} · {h.minutos} min · {h.origen === 'calculado' ? `Tiempo libre de su horario · agenda cargada ${haceTexto(horasDesdeCarga(p.ultimaCarga))}` : 'Agregado a mano'}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <span className="rounded-full bg-white/12 px-3 py-1 text-xs font-semibold">{INFO[e].t}</span>
-            {!h.ocupadoPor && (
+            {puedeBloquear && (
+              <button
+                onClick={() => p.onVerificar([h.id], false)}
+                title="Úsalo si al agendarlo en el software este horario ya estaba tomado"
+                className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white/80 ring-1 ring-white/15 hover:bg-white/20 hover:text-white"
+              >
+                <Lock className="size-3.5" aria-hidden /> Ya está ocupado
+              </button>
+            )}
+            {/* un cupo calculado no se borra: volvería a aparecer mientras el horario diga que está libre */}
+            {!p.soloLectura && !h.ocupadoPor && (h.origen === 'manual' || e === 'perdido') && (
               <button onClick={() => p.onBorrar(h.id)} aria-label="Eliminar cupo" title="Eliminar cupo" className="rounded-full p-2 text-white/65 hover:bg-white/10 hover:text-white">
                 <Trash2 className="size-4" />
               </button>
@@ -294,7 +361,9 @@ function Detalle({ h, e, ...p }: Props & { h: Hueco; e: EstadoEspacio }) {
         </ol>
       </section>
 
-      {paciente ? <Asignado h={h} e={e} paciente={paciente} {...p} /> : e === 'perdido' ? (
+      {p.soloLectura ? (
+        <SoloVer h={h} e={e} paciente={paciente} pacientes={p.pacientes} onAbrir={p.onAbrir} />
+      ) : paciente ? <Asignado h={h} e={e} paciente={paciente} {...p} /> : e === 'perdido' ? (
         <div className="card p-6 text-sm">
           <p className="font-semibold">Nadie ocupó este cupo.</p>
           <p className="mt-1 text-muted">
@@ -326,7 +395,7 @@ function PorLlenar({ h, ...p }: Props & { h: Hueco }) {
       {esperando.length > 0 && (
         <section className="entrar card p-5 sm:p-6">
           <h3 className="font-semibold">Esperando respuesta</h3>
-          <p className="text-sm text-muted">Cuando te contesten, registra lo que dijeron. Si acepta, el cupo queda asignado.</p>
+          <p className="text-sm text-muted">Cuando acepte, agéndalo en el software de la clínica y marca «Aceptó».</p>
           <ul className="mt-3 divide-y divide-line">
             {esperando.map(({ o, x }) => (
               <li key={o.pacienteId} className="flex flex-wrap items-center gap-3 py-3">
@@ -422,7 +491,8 @@ function Candidato({ x, h, hoy, asesora, onAbrir, onOfrecer, onAsignar }: { x: P
           {x.especialista !== h.especialista && <Etiqueta tono="oscuro">Del Dr. Olarte</Etiqueta>}
         </span>
         <span className="block truncate text-xs text-muted">
-          {CASO_TXT[x.caso]} hace {diasEntre(x.fechaEvento, hoy)} días · {x.tratamiento} · <b className="text-ink/70">{pesosCorto(x.valor)}</b>
+          {CASO_TXT[x.caso]} {diasEntre(x.fechaEvento, hoy) >= 0 ? `hace ${diasEntre(x.fechaEvento, hoy)} días` : `· seguimiento desde el ${fechaCorta(x.fechaEvento)}`} · {x.tratamiento} ·{' '}
+          <b className="text-ink/70">{pesosCorto(x.valor)}</b>
         </span>
       </span>
       {x.telefono ? (
@@ -561,11 +631,12 @@ function NuevoEspacio({ hoy, onGuardar, onCancelar }: { hoy: string; onGuardar: 
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onGuardar({ id: `h-${Date.now()}`, fecha, hora, minutos, especialista, ofertas: [] });
+        onGuardar({ id: `h-${Date.now()}`, fecha, hora, minutos, especialista, origen: 'manual', ofertas: [] });
       }}
       className="hoja card mt-6 p-5"
     >
       <p className="font-semibold">¿Qué cupo se liberó?</p>
+      <p className="text-xs text-muted">Solo para lo que el cálculo aún no ve, como una cancelación que llegó por WhatsApp y todavía no está en el Excel.</p>
       <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_1fr_1.6fr_auto] sm:items-end">
         <label className="text-xs font-medium text-muted">
           Fecha
@@ -601,5 +672,245 @@ function NuevoEspacio({ hoy, onGuardar, onCancelar }: { hoy: string; onGuardar: 
         </div>
       </div>
     </form>
+  );
+}
+
+// avisos del cálculo: especialistas sin horario y días que no se pudieron calcular
+function Avisos({ sinHora, sinHorario, onIrHorarios, soloLectura, agendaSinCitas, cubiertaHasta, hoy, onRecargar, ultimaCarga, onIrCargar, huecos, cargaAutomatica, fuenteAgenda, fuenteError }: Props) {
+  const sinDatos = !!cubiertaHasta && cubiertaHasta < hoy; // el Excel no llega a los días que se calculan
+  const horas = horasDesdeCarga(ultimaCarga);
+  const vieja = horas > AGENDA_VIEJA_H && huecos.some((h) => h.origen === 'calculado');
+  if (!sinHora.length && !sinHorario.length && !agendaSinCitas && !vieja && !fuenteError) return null;
+  return (
+    <div className="mt-6 space-y-2">
+      {fuenteError && !soloLectura && (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-rojo/[.07] px-4 py-3 text-sm text-rojo">
+          <AlertTriangle className="size-4 shrink-0" aria-hidden />
+          <span className="flex-1">No se pudo actualizar la agenda en línea: {fuenteError}</span>
+          {onIrCargar && (
+            <button onClick={onIrCargar} className={`${btnChico} bg-white text-ink`}>
+              Revisar conexión
+            </button>
+          )}
+        </p>
+      )}
+      {vieja && !fuenteError && (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-amarillo/10 px-4 py-3 text-sm">
+          <FileSpreadsheet className="size-4 shrink-0 text-amarillo" aria-hidden />
+          <span className="flex-1">
+            La agenda se cargó <b>{haceTexto(horas)}</b>: lo que se agendó después no aparece y algún cupo podría estar ya ocupado.
+            {cargaAutomatica
+              ? fuenteAgenda === 'carpeta'
+                ? ' Guarda la exportación de hoy en la carpeta de la agenda: el panel la carga solo.'
+                : ' La fuente en línea no ha cambiado: revisa que el software siga actualizándola.'
+              : onIrCargar
+                ? ' Carga el Excel de hoy para ponerlos todos al día.'
+                : ' Recepción lo actualiza al cargar el Excel del día.'}
+          </span>
+          {onIrCargar && (
+            <button onClick={onIrCargar} className={`${btnChico} bg-ink text-white`}>
+              Cargar Excel de hoy
+            </button>
+          )}
+        </p>
+      )}
+      {sinHorario.length > 0 && (
+        <div className="rounded-2xl bg-amarillo/10 px-4 py-3 text-sm">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <AlertTriangle className="size-4 shrink-0 text-amarillo" aria-hidden />
+            <span className="flex-1">
+              {soloLectura ? 'Gerencia aún no ha definido tu horario' : `Falta el horario de ${sinHorario.join(' y ')}`}: sin horario no se puede calcular el tiempo libre.
+            </span>
+            {onIrHorarios && (
+              <button onClick={onIrHorarios} className={`${btnChico} text-ink/70 hover:bg-white`}>
+                Ajustar en Equipo
+              </button>
+            )}
+          </p>
+          {onIrHorarios && <Sugerido sinHorario={sinHorario} onAplicado={onRecargar} />}
+        </div>
+      )}
+      {agendaSinCitas > 0 && (
+        <p className="flex items-start gap-3 rounded-2xl bg-soft px-4 py-3 text-sm text-ink/75">
+          <CalendarSearch className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden />
+          <span>
+            {sinDatos ? (
+              <>
+                La agenda cargada llega hasta el <b>{fechaLarga(cubiertaHasta!)}</b>: después no se sabe qué está ocupado, así que no se ofrece como libre.
+                {!soloLectura && ' Para calcular los próximos días, carga una exportación que incluya las citas ya agendadas.'}
+              </>
+            ) : (
+              <>
+                No se muestran {agendaSinCitas} {agendaSinCitas === 1 ? 'día que aún no tiene' : 'días que aún no tienen'} ninguna cita: es normal en fechas lejanas o festivos, y no son huecos por llenar.
+              </>
+            )}
+          </span>
+        </p>
+      )}
+      {sinHora.length > 0 && (
+        <details className="rounded-2xl bg-soft px-4 py-3 text-sm">
+          <summary className="cursor-pointer font-medium">
+            {sinHora.length} {sinHora.length === 1 ? 'día no se pudo calcular' : 'días no se pudieron calcular'}: el Excel trae citas sin hora
+          </summary>
+          <ul className="mt-2 space-y-0.5 text-ink/75">
+            {sinHora.map((d) => (
+              <li key={d.fecha + d.profesional}>
+                {fechaLarga(d.fecha)} · {d.profesional}: {d.citas} {d.citas === 1 ? 'cita' : 'citas'} sin hora
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted">Carga el archivo de detalle de la agenda (el que trae la hora de cada cita) para calcular esos días.</p>
+        </details>
+      )}
+    </div>
+  );
+}
+
+// vista del especialista: qué pasa con el cupo, sin acciones
+function SoloVer({ h, e, paciente, pacientes, onAbrir }: { h: Hueco; e: EstadoEspacio; paciente?: Paciente; pacientes: Paciente[]; onAbrir: (id: string) => void }) {
+  const ofrecidos = h.ofertas.map((o) => ({ o, x: pacientes.find((y) => y.id === o.pacienteId) })).filter((v) => v.x);
+  return (
+    <section className="entrar card p-5 sm:p-6 text-sm">
+      {paciente ? (
+        <>
+          <p className="font-semibold">Asignado a</p>
+          <button onClick={() => onAbrir(paciente.id)} className="mt-2 flex items-center gap-3 text-left">
+            <Iniciales nombre={paciente.nombre} />
+            <span>
+              <span className="block font-medium hover:underline">{paciente.nombre}</span>
+              <span className="text-xs text-muted">
+                {paciente.tratamiento} · {INFO[e].t}
+              </span>
+            </span>
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="font-semibold">
+            {e === 'perdido' ? 'Nadie ocupó este cupo' : ofrecidos.length ? 'Recepción lo está ofreciendo' : 'Recepción se lo ofrecerá a tus pacientes pendientes'}
+          </p>
+          {ofrecidos.length > 0 ? (
+            <ul className="mt-2 space-y-1 text-ink/75">
+              {ofrecidos.map(({ o, x }) => (
+                <li key={o.pacienteId}>
+                  {x!.nombre} · {o.rechazo ? 'no puede' : 'esperando respuesta'}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1 text-muted">Aún no se ha ofrecido a nadie.</p>
+          )}
+        </>
+      )}
+      <p className="mt-4 text-xs text-muted">Si quieres que se le dé prioridad a alguien, déjale una nota en su expediente.</p>
+    </section>
+  );
+}
+
+// horario y almuerzo deducidos de las citas: gerencia los aplica con un clic
+function Sugerido({ sinHorario, onAplicado }: { sinHorario: Profesional[]; onAplicado: () => void }) {
+  const [s, setS] = useState<{ horarios: Record<string, Franja[]>; pausas: Pausa[]; citas: number } | null>(null);
+  const [pausasActuales, setPausasActuales] = useState<Pausa[]>([]);
+  const [estado, setEstado] = useState<'' | 'cargando' | 'aplicando' | string>('');
+  const ver = async () => {
+    setEstado('cargando');
+    try {
+      const [sug, eq] = await Promise.all([api.horarioSugerido(), api.equipo()]);
+      setS(sug);
+      setPausasActuales(eq.pausas);
+      setEstado('');
+    } catch (e) {
+      setEstado((e as Error).message);
+    }
+  };
+  const aplicables = sinHorario.filter((p) => s?.horarios[p]?.length);
+  const pausas = pausasActuales.length ? [] : (s?.pausas ?? []);
+  const aplicar = async () => {
+    setEstado('aplicando');
+    try {
+      for (const p of aplicables) await api.guardarHorario(p, s!.horarios[p]);
+      if (pausas.length) await api.guardarPausas(pausas);
+      onAplicado();
+    } catch (e) {
+      setEstado((e as Error).message);
+    }
+  };
+  if (!s)
+    return (
+      <button onClick={ver} disabled={estado === 'cargando'} className={`${btnChico} mt-2 bg-ink text-white`}>
+        {estado === 'cargando' ? 'Calculando…' : 'Ver el horario sugerido según las citas'}
+      </button>
+    );
+  return (
+    <div className="hoja mt-3 rounded-2xl bg-white p-4">
+      <p className="font-semibold">Horario sugerido</p>
+      <p className="text-xs text-muted">Deducido de {s.citas} citas con hora del Excel cargado. Revísalo; podrás ajustarlo en Equipo cuando quieras.</p>
+      <ul className="mt-2 space-y-1">
+        {sinHorario.map((p) => (
+          <li key={p}>
+            <b className="font-medium">{p}:</b> {s.horarios[p]?.length ? resumenHorario(s.horarios[p]) : <span className="text-muted">sin citas suficientes para sugerir</span>}
+          </li>
+        ))}
+        {pausas.map((p) => (
+          <li key={p.nombre}>
+            <b className="font-medium">{p.nombre}:</b> {p.inicio}–{p.fin} <span className="text-muted">(casi no hay citas a esa hora)</span>
+          </li>
+        ))}
+      </ul>
+      {typeof estado === 'string' && estado && estado !== 'aplicando' && <p className="mt-2 text-xs text-rojo">{estado}</p>}
+      <div className="mt-3 flex gap-2">
+        <button onClick={aplicar} disabled={!aplicables.length || estado === 'aplicando'} className={`${btnChico} bg-ink text-white disabled:opacity-40`}>
+          <Check className="size-3.5" aria-hidden /> {estado === 'aplicando' ? 'Aplicando…' : 'Aplicar'}
+        </button>
+        <button onClick={() => setS(null)} className={`${btnChico} text-muted hover:text-ink`}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// cupo marcado como «ya estaba ocupado»: se ve sellado y se puede devolver con un clic
+function Ocupado({ h, ...p }: Props & { h: Hueco }) {
+  return (
+    <div className="space-y-4">
+      <section className="entrar rayado relative overflow-hidden rounded-[28px] bg-soft p-6 ring-1 ring-line sm:p-7">
+        <div className="relative flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-sm text-muted">
+              {nombreDia(h.fecha, p.hoy)} · {fechaLarga(h.fecha)}
+            </p>
+            <p className="num relative mt-1 inline-block text-4xl font-bold tracking-tight text-ink/35">
+              {h.hora} – {horaFin(h)}
+              <span className="crecer-x absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-ink/55" aria-hidden />
+            </p>
+            <p className="mt-1 text-sm text-muted">
+              {h.especialista} · {h.minutos} min
+            </p>
+          </div>
+          <span className="sello select-none rounded-xl border-[3px] border-rojo/70 bg-paper/70 px-3 py-1 text-lg font-black uppercase tracking-[.22em] text-rojo/80" aria-hidden>
+            Ocupado
+          </span>
+        </div>
+      </section>
+
+      <section className="entrar card p-5 sm:p-6">
+        <h3 className="flex items-center gap-2 font-semibold">
+          <Lock className="size-4 text-muted" aria-hidden /> Ocupado en el software de la clínica
+        </h3>
+        <p className="mt-1 text-sm text-muted">
+          Se marcó porque, al agendarlo, este horario ya estaba tomado. Ya no se ofrece a ningún paciente ni cuenta como agenda libre.
+        </p>
+        {!p.soloLectura && (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button onClick={() => p.onVerificar([h.id], null)} className={`${btnNegro} group`}>
+              <RotateCcw className="size-4 transition-transform group-hover:-rotate-90" aria-hidden /> Volver a ofrecerlo
+            </button>
+            <span className="text-xs text-muted">¿Fue un error? Vuelve a la agenda libre tal como estaba.</span>
+          </div>
+        )}
+        <p className="mt-4 border-t border-line pt-3 text-xs text-muted">Esto solo cambia el panel: no modifica nada en el software de la clínica.</p>
+      </section>
+    </div>
   );
 }

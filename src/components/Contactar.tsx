@@ -17,6 +17,9 @@ import {
   pesos,
   semaforo,
   sumarDias,
+  porQueSemaforo,
+  PASO_TXT,
+  SEMAFORO_INFO,
 } from '../lib/reglas';
 import { Iniciales, Insignias, Modal, Punto, SEMAFORO_TXT, btnBorde, btnNegro } from './ui';
 
@@ -118,10 +121,12 @@ export function Contactar({
             <p className="flex items-center gap-2 text-sm font-semibold">
               {color && <Punto color={color} />}
               {color ? SEMAFORO_TXT[color] : 'Sin etapa'}
-              {paso && <span className="font-normal text-muted">· día {paso}</span>}
+              {paso && <span className="font-normal text-muted">· {PASO_TXT[paso]}</span>}
             </p>
+            {color && <p className="mt-0.5 text-[13px] text-ink/80">{porQueSemaforo(p, hoy)}</p>}
             <p className="mt-0.5 text-xs text-muted">
-              {porQue} · hace {diasEntre(p.fechaEvento, hoy)} días
+              {color ? `${SEMAFORO_INFO[color].hacer} · ` : ''}
+              {porQue}
             </p>
           </div>
           <div className="min-w-0">

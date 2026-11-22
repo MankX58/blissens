@@ -85,6 +85,8 @@ export interface Hueco {
   hora: string;
   minutos: number;
   especialista: Profesional;
+  origen: 'calculado' | 'manual'; // calculado: sale del horario del especialista; manual: lo agregó recepción
+  verificacion?: 'libre' | 'ocupado'; // un cupo calculado se revisa en el software antes de ofrecerlo
   ocupadoPor?: string;
   asignadoEl?: string;
   estadoPrevio?: Estado;
@@ -129,6 +131,51 @@ export interface Datos {
   asesora: string; // quien firma los guiones: [ASESOR/A]
   fechaCorte: string; // fecha de trabajo: por defecto, el cierre de la agenda cargada
   archivos: string[];
+  // agenda libre calculada: días sin calcular (citas del Excel sin hora) y especialistas sin horario
+  agendaSinHora: { fecha: string; profesional: Profesional; citas: number }[];
+  sinHorario: Profesional[];
+  agendaSinCitas: number; // días de atención aún sin ninguna cita: no se ofrecen (no son huecos reales)
+  agendaCubiertaHasta?: string; // última fecha con citas en el Excel cargado
+  ultimaCarga?: string; // cuándo se cargó el Excel por última vez (ISO, UTC)
+  cargaAutomatica: boolean; // la agenda se actualiza sola (carpeta, enlace en línea o base de datos)
+  fuenteAgenda?: FuenteAgenda['tipo'];
+  fuenteError?: string; // por qué falló la última actualización automática
+  cuposOcupados: Hueco[]; // marcados como «ya estaba ocupado»: ocultos, pero se pueden devolver
+}
+
+// ---------- de dónde se actualiza sola la agenda ----------
+export interface FuenteAgenda {
+  tipo: 'carpeta' | 'enlace' | 'base' | null; // null: solo carga manual
+  enlace: string; // completo solo para gerencia
+  enlaceDetalle: string;
+  cadaMin: number;
+  ultimaRevision?: string;
+  error?: string;
+}
+
+// ---------- equipo: horarios, descansos y vacaciones (los define gerencia) ----------
+export interface Franja {
+  dia: number; // 0 = lunes … 6 = domingo
+  inicio: string; // HH:MM
+  fin: string;
+}
+export interface Pausa {
+  nombre: string;
+  inicio: string;
+  fin: string;
+}
+export interface Ausencia {
+  id: string;
+  userId: string;
+  nombre: string;
+  desde: string;
+  hasta: string;
+  motivo: string;
+}
+export interface Equipo {
+  horarios: Record<Profesional, Franja[]>;
+  pausas: Pausa[];
+  ausencias: Ausencia[];
 }
 
 export type Pantalla = 'inicio' | 'hoy' | 'pacientes' | 'agenda' | 'campanas' | 'indicadores' | 'cargar' | 'cuentas';

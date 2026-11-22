@@ -26,7 +26,7 @@ La estructura exacta (tipos, llaves, índices) está en [`esquema.sql`](esquema.
 | Catálogos | `especialidades`, `profesionales`, `sucursales`, `sillones`, `usuarios_sistema`, `estados_cita`, `eventos_cita`, `aranceles`, `categorias_arancel`, `acciones_arancel`, `guiones` | ETL del backend (`app/modules/ingesta_excel/`) | Lectura. |
 | Agenda importada | `citas`, `cita_eventos`, `tratamientos`, `apoderados` | Carga de Excel (`scripts/`) | Lectura. Escritura solo al cargar un Excel nuevo. |
 | Pacientes | `pacientes`, `etiquetas_paciente` | Carga de Excel + reglas | Ficha: lectura. `estado_seguimiento`, `motivo_cancelacion` y `recuperado_el` cambian con el trabajo del día. Las columnas calculadas se recalculan (ver abajo). |
-| Trabajo del panel | `contactos_seguimiento`, `notas_paciente`, `ciclos_seguimiento`, `agenda_libre`, `ofertas_cupo`, `campanas`, `envios_campana` | **FastAPI** | Lectura y escritura: el panel registra aquí todo lo que se trabaja (recargar los Excel no lo borra). |
+| Trabajo del panel | `contactos_seguimiento`, `notas_paciente`, `ciclos_seguimiento`, `agenda_libre`, `ofertas_cupo`, `campanas`, `envios_campana`, `horarios_profesional`, `pausas_agenda`, `ausencias` | **FastAPI** | Lectura y escritura: el panel registra aquí todo lo que se trabaja (recargar los Excel no lo borra). |
 | Control | `cargas_excel`, `configuracion` | Carga de Excel / FastAPI | Lectura y escritura. |
 
 ## Roles
@@ -35,16 +35,17 @@ Los roles viven en `user.role`. El panel y Better Auth los definen una sola vez 
 
 | `user.role` | Se muestra como | Secciones | Qué **no** debe recibir de la API |
 |---|---|---|---|
-| `auxiliar` | Recepción y seguimiento | Inicio, Hoy toca contactar, Pacientes, Agenda libre, Cargar agenda | Indicadores, campañas, cuentas |
+| `auxiliar` | Recepción y seguimiento | Inicio, Hoy toca contactar, Pacientes, Agenda libre, Campañas, Cargar agenda | Indicadores, cuentas |
 | `especialista` | Especialista | Inicio, Mis pacientes, Mi agenda libre | **Pacientes y cupos de otro especialista.** Filtrar con `user.profesional` (`'Dra. Sara López'` \| `'Dr. Juan Manuel Olarte'`) contra `pacientes.profesional_principal` y `agenda_libre.profesional` |
-| `mercadeo` | Campañas de reactivación | Inicio, Campañas | Expedientes, notas internas (`notas_paciente`, `observaciones_medicas`), agenda, indicadores, cuentas |
 | `direccion` | Gerencia | Todas + Indicadores + Cuentas | — |
+
+No hay rol de campañas: en la clínica la misma auxiliar lleva la agenda y el WhatsApp, y una campaña es el paso que sigue cuando el 3-7-15 no funcionó. Separarlo obligaría a pasar pacientes de una persona a otra sin ganar nada.
 
 `requiere_rol(...)` devuelve `UsuarioSesion(id, nombre, email, rol, profesional)`. El especialista ya queda limitado a su agenda en el backend: `agenda_permitida(usuario)` da su `profesional` (o `None` si no hay límite) y `comprobar_agenda(usuario, profesional)` responde 403 si el paciente o cupo es de otra agenda. Ejemplo (así está `GET /api/v1/pacientes`):
 
 ```python
 @enrutador.get("")
-def listar(profesional: str | None = None, usuario=Depends(requiere_rol("auxiliar", "especialista", "mercadeo"))):
+def listar(profesional: str | None = None, usuario=Depends(requiere_rol("auxiliar", "especialista"))):
     profesional = agenda_permitida(usuario) or profesional  # el especialista solo ve su agenda
     ...
 ```
@@ -55,7 +56,7 @@ def listar(profesional: str | None = None, usuario=Depends(requiere_rol("auxilia
 
 | Tabla | Campos clave |
 |---|---|
-| `user` | `id` (texto), `name`, `email` (único), `emailVerified`, `image`, **`role`** (`auxiliar` \| `especialista` \| `mercadeo` \| `direccion`), **`profesional`** (solo especialistas: su agenda; lo asigna gerencia), `banned` (1 = desactivada), `banReason`, `banExpires`, `createdAt`, `updatedAt` |
+| `user` | `id` (texto), `name`, `email` (único), `emailVerified`, `image`, **`role`** (`auxiliar` \| `especialista` \| `direccion`), **`profesional`** (solo especialistas: su agenda; lo asigna gerencia), `banned` (1 = desactivada), `banReason`, `banExpires`, `createdAt`, `updatedAt` |
 | `session` | `token` (el valor de la cookie antes del `.`), `userId` → `user.id`, `expiresAt`, `ipAddress`, `userAgent`, `impersonatedBy` |
 | `account` | `userId` → `user.id`, `providerId` (`'google'` o `'credential'`), `accountId`, `password` (hash, solo con `'credential'`). Tokens de Google: `accessToken`, `refreshToken`, `idToken`, `accessTokenExpiresAt`, `refreshTokenExpiresAt`, `scope` (**secretos: nunca devolverlos en la API**). |
 | `verification` | `identifier`, `value`, `expiresAt`. Estados temporales del inicio con Google. No se usa desde Python. |
@@ -198,17 +199,53 @@ Si `resultado = 'agendo'`, el paciente pasa a `estado_seguimiento = 'recuperado'
 | `notas_paciente` | `id` | `numero_paciente`, `fecha`, `texto`, `registrado_por` |
 | `ciclos_seguimiento` | `id` | Procesos 3-7-15 ya cerrados de un paciente (cuando vuelve a caer con un caso nuevo). `caso` (como `caso_seguimiento`), `fecha_evento`, `cierre` (como `estado_seguimiento`), `motivo`, `contactos_json` (lista JSON de `{fecha, paso, resultado, mensaje, nota?}`). |
 
-**`agenda_libre`** (`id`): un cupo libre de la agenda. Las cancelaciones futuras se convierten en cupos.
+**`agenda_libre`** (`id`): un cupo libre de la agenda. **Se calcula solo** (`app/modules/equipo/tiempo_libre.py`, en cada `GET /api/v1/panel`, para los 14 días desde la fecha de trabajo):
+
+> tiempo libre = horario del especialista (`horarios_profesional`) − descansos (`pausas_agenda`) − citas agendadas con hora (las `Anulado`, `Anulado por pcte. via Whatsapp` y `Cambio de fecha` liberan el espacio) − cupos que ya existen; nada en los días de `ausencias`.
+
+Lo libre se parte en cupos de 60 min (un resto de 30 min o más también se ofrece). Al recalcular se borran solo los cupos calculados que nadie tocó (sin `ocupado_por`, ofertas ni `verificacion`).
+
+Cuándo **no** se calcula un día (y el panel lo explica en vez de mostrar cupos falsos):
+
+| Caso | Por qué | Campo del panel |
+|---|---|---|
+| Sin ninguna cita ni cupo ese día | Aún no se ha agendado (fechas lejanas), el Excel no llega hasta ahí o es festivo: no es un hueco por llenar | `agenda_sin_citas` (cuántos días) y `agenda_cubierta_hasta` (última fecha con citas en el Excel) |
+| Citas **sin hora** en el Excel | No se sabe qué parte del día está ocupada | `agenda_sin_hora` |
+| Especialista sin horario | No hay con qué calcular | `sin_horario` |
+| Vacaciones o ausencia | — | — |
+
+**Datos al día, sin revisar cupo por cupo.** El riesgo de un cupo calculado es que alguien lo haya agendado después de la última carga del Excel. Se cubre de dos formas:
+
+- El panel devuelve `ultima_carga` (fecha y hora de la última carga completada en `cargas_excel`). Si tiene más de 24 h, la agenda libre y el Inicio de recepción piden cargar el Excel del día: una carga pone al día todos los cupos.
+- Si al agendar un paciente en el software el horario ya estaba tomado, recepción lo marca («ya estaba ocupado»: `POST /api/v1/agenda/huecos/verificar` con `{ids, libre: false}`). Queda como bloqueo: no se lista, no cuenta en indicadores y el recálculo no vuelve a crear ese tiempo. **Se puede deshacer** (`libre: null`): el panel devuelve los bloqueados en `cupos_ocupados` y la agenda los muestra en «Marcados como ocupados» con «Volver a mostrar».
+- **La agenda se actualiza sola** desde una de tres fuentes (`app/modules/ingesta_excel/carga_automatica.py`; el panel lo informa en `fuente_agenda` y `fuente_error`):
+  | Fuente | Cómo se configura | Cuándo se recarga |
+  |---|---|---|
+  | **Enlace en línea** (Google Sheets, Google Drive, OneDrive/SharePoint, https a un .xlsx) | Gerencia lo pega en *Cargar agenda → Conectar archivo en línea* (se prueba antes de guardarlo; queda en `configuracion` con las claves `agenda_url` y `agenda_detalle_url`) o `AGENDA_URL` / `AGENDA_DETALLE_URL` en el `.env` | Se revisa cada `REVISAR_FUENTE_MIN` (15) min y solo se recarga si el contenido cambió |
+  | **Base de datos en línea** del software | `AGENDA_BD_URL` (URL de SQLAlchemy) + `AGENDA_BD_CONSULTA` (y `_DETALLE`) en el `.env`: consultas que devuelven las mismas columnas del Excel. Solo en el `.env` porque lleva contraseña | Igual que el enlace |
+  | **Carpeta** (`CARGA_AUTOMATICA=true`) | La exportación guardada en `RUTA_DATOS_EXCEL`, p. ej. una carpeta sincronizada | Cuando el archivo es más nuevo que la última carga |
+
+  Endpoints: `GET /api/v1/ingesta/fuente` (estado), `PUT /api/v1/ingesta/fuente` (gerencia: `{enlace, enlace_detalle}`; vacíos = desconectar), `POST /api/v1/ingesta/fuente/actualizar` (revisar ahora). Si la fuente falla, el panel sigue con la última agenda cargada y muestra el motivo en palabras sencillas (nunca el enlace ni contraseñas). Una fuente que trae solo la agenda conserva los guiones y el arancel de la carpeta.
+
+`GET /api/v1/equipo/sugerido` (gerencia) deduce un horario de las citas con hora: días de la semana con al menos 3 citas, de la primera a la última hora con citas, y el almuerzo en la hora entre 11:00 y 14:00 que casi no tiene citas.
 
 | Campo | Valores |
 |---|---|
 | `fecha`, `hora` (`'HH:MM'`), `minutos` | Duración |
+| `origen` | `'calculado'` (sale del horario) \| `'manual'` (lo agregó recepción, p. ej. una cancelación que aún no llega en el Excel) |
+| `verificacion` | Solo calculados: `NULL` (normal) \| `'ocupado'` (al agendarlo en el software ya estaba tomado: bloqueo que no se muestra) \| `'libre'` (confirmado libre; el recálculo lo conserva) |
 | `profesional` / `id_profesional`, `sillon` / `id_sillon` | Texto / llave al catálogo |
 | `ocupado_por` | → `pacientes`. `NULL` = libre. |
 | `asignado_el` (`DATE`), `asignado_por` (→ `user.id`) | Asignación |
 | `estado_previo` | `estado_seguimiento` que tenía el paciente antes de asignarle el cupo, para poder revertir |
 | `confirmado_el` | `DATE` de la confirmación 24 h antes |
 | `asistencia` | `'asistio'` \| `'no_asistio'` \| `NULL`. Si es `'no_asistio'`, el paciente vuelve al 3-7-15 con `caso = 'no_asistio'`. |
+
+**`horarios_profesional`** (`id`): franja semanal de atención. `profesional` (`'Dra. Sara López'` \| `'Dr. Juan Manuel Olarte'`), `dia_semana` (0 = lunes … 6 = domingo), `inicio`, `fin` (`'HH:MM'`). Puede haber varias franjas por día. La define gerencia en *Equipo* (`PUT /api/v1/equipo/horarios`).
+
+**`pausas_agenda`** (`id`): descansos diarios de la clínica (almuerzo, pausas): `nombre`, `inicio`, `fin`. Nunca cuentan como agenda libre (`PUT /api/v1/equipo/pausas`).
+
+**`ausencias`** (`id`): vacaciones u otra ausencia de **cualquier cuenta**. `user_id` → `user.id` (se borra con la cuenta), `desde`, `hasta` (`DATE`, ambos incluidos), `motivo` (`'Vacaciones'` \| `'Incapacidad'` \| `'Permiso'` \| `'Capacitación'`), `registrado_por` → `user.id`. Si la cuenta es de un especialista (`user.profesional`), esos días su agenda no tiene tiempo libre (`POST` / `DELETE /api/v1/equipo/ausencias`).
 
 **`ofertas_cupo`** (`id`): a quién se le ofreció un cupo. `cupo_id` → `agenda_libre`, `numero_paciente`, `fecha`, `rechazo` (1 = "No puede"), `registrado_por`.
 

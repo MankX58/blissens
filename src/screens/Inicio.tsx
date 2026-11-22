@@ -13,18 +13,17 @@ import {
   HeartPulse,
   Megaphone,
   PhoneOff,
-  Send,
   Sparkles,
   Stethoscope,
   UserCog,
   type LucideIcon,
 } from 'lucide-react';
 import type { Datos, Motivo, Paciente, Pantalla, Profesional, Resultado } from '../types';
-import { CASO_TXT, ESPECIALISTAS, GRUPO_TXT, MOTIVO_TXT, RESULTADO_TXT, esVIP, diasEntre, fechaCorta, pesosCorto, riesgoAlto, semaforo, sumarDias, tocaHoy } from '../lib/reglas';
+import { CASO_TXT, ESPECIALISTAS, GRUPO_TXT, MOTIVO_TXT, RESULTADO_TXT, SEMAFORO_INFO, esVIP, diasEntre, fechaCorta, pesosCorto, riesgoAlto, semaforo, sumarDias, tocaHoy } from '../lib/reglas';
 import { AUDIENCIAS } from '../lib/campanas';
 import { ROLES, type Rol } from '../lib/roles';
-import { estadoDe } from './Agenda';
-import { Cifra, Iniciales, Insignias, Vacio, btnNegro } from '../components/ui';
+import { AGENDA_VIEJA_H, estadoDe, haceTexto, horasDesdeCarga } from './Agenda';
+import { Cifra, Iniciales, Insignias, SEMAFORO_TXT, Vacio, btnNegro } from '../components/ui';
 
 type Tono = 'urgente' | 'atencion' | 'ok';
 interface Resp {
@@ -359,7 +358,7 @@ function TuRol({ rol }: { rol: Rol }) {
 // ---------- cálculos por rol ----------
 const COLOR = { rojo: '#d93f45', amarillo: '#dc9411', verde: '#2f9e62' };
 const porColor = (lista: Paciente[], hoy: string) =>
-  (['rojo', 'amarillo', 'verde'] as const).map((c) => ({ k: { rojo: 'Urgente · 0-3 días, VIP o riesgo', amarillo: 'Seguimiento · día 7', verde: 'Rescate · día 15' }[c], v: lista.filter((p) => semaforo(p, hoy) === c).length, color: COLOR[c] }));
+  (['rojo', 'amarillo', 'verde'] as const).map((c) => ({ k: `${SEMAFORO_TXT[c]} · ${SEMAFORO_INFO[c].corto.toLowerCase()}`, v: lista.filter((p) => semaforo(p, hoy) === c).length, color: COLOR[c] }));
 const pendiente = (p: Paciente) => p.estado === 'pendiente' || p.estado === 'agotado';
 const suma = (ps: Paciente[]) => ps.reduce((s, p) => s + p.valor, 0);
 const contar = <K extends string>(claves: K[], de: K[]) => claves.map((k) => ({ k, v: de.filter((x) => x === k).length })).filter((x) => x.v).sort((a, b) => b.v - a.v);
@@ -411,6 +410,9 @@ const RESUMEN: Record<Rol, (d: Datos, hoy: string) => Resumen> = {
     const semana = pacientes.flatMap((p) => p.contactos).filter((c) => c.fecha >= sumarDias(hoy, -6));
     const res = contar(Object.keys(RESULTADO_TXT) as Resultado[], semana.map((c) => c.resultado));
     const porConfirmar = n('confirmar') + n('asistencia');
+    // campañas: siguen al 3-7-15 (quien no respondió) y los envía la misma persona por WhatsApp
+    const agotados = pacientes.filter(AUDIENCIAS.find((a) => a.id === 'agotado')!.filtro).filter((p) => p.telefono);
+    const enCurso = d.campanas.filter((c) => c.estado === 'enviando' || c.estado === 'programada' || c.estado === 'pausada');
     return {
       foco: urgentes
         ? { texto: `empieza por los ${urgentes} urgentes: cancelaron o faltaron hace 3 días o menos, o son de alto riesgo.`, accion: 'Ir a la lista del día', ir: 'hoy' }
@@ -418,13 +420,16 @@ const RESUMEN: Record<Rol, (d: Datos, hoy: string) => Resumen> = {
           ? { texto: `confirma ${n('confirmar')} citas de mañana y registra ${n('asistencia')} asistencias.`, accion: 'Abrir agenda libre', ir: 'agenda' }
           : delDia.length
             ? { texto: `tienes ${delDia.length} pacientes para contactar hoy con la regla 3-7-15.`, accion: 'Ir a la lista del día', ir: 'hoy' }
-            : { texto: 'no hay contactos pendientes para hoy. Revisa los cupos libres para llenar la agenda.', accion: 'Abrir agenda libre', ir: 'agenda' },
+            : agotados.length
+              ? { texto: `${agotados.length} pacientes terminaron el 3-7-15 sin responder. Una campaña de WhatsApp les da otra oportunidad.`, accion: 'Crear campaña', ir: 'campanas' }
+              : { texto: 'no hay contactos pendientes para hoy. Revisa los cupos libres para llenar la agenda.', accion: 'Abrir agenda libre', ir: 'agenda' },
       resps: [
         { titulo: 'Seguimiento 3-7-15', icono: Sparkles, valor: delDia.length, unidad: 'por contactar hoy', detalle: urgentes ? `${urgentes} urgentes: recientes, VIP o riesgo alto` : 'Sin urgentes', tono: urgentes ? 'urgente' : delDia.length ? 'atencion' : 'ok', avance: [hechos, hechos + delDia.length], desglose: colores, accion: 'Contactar', ir: 'hoy' },
         { titulo: 'Confirmar y registrar', icono: CalendarCheck, valor: porConfirmar, unidad: 'citas de cupos', detalle: `${n('confirmar')} por confirmar 24 h antes · ${n('asistencia')} por registrar asistencia`, tono: porConfirmar ? 'urgente' : 'ok', accion: 'Abrir agenda', ir: 'agenda' },
         { titulo: 'Cupos libres', icono: CalendarClock, valor: n('libre'), unidad: 'por llenar', detalle: `${n('ofrecido')} esperando respuesta del paciente`, tono: n('libre') ? 'atencion' : 'ok', avance: [futuros.filter((h) => h.ocupadoPor).length, futuros.length], accion: 'Llenar cupos', ir: 'agenda' },
+        { titulo: 'Campañas de reactivación', icono: Megaphone, valor: agotados.length, unidad: 'sin respuesta tras 3-7-15', detalle: enCurso.length ? `${enCurso.length} ${enCurso.length === 1 ? 'campaña' : 'campañas'} en curso` : 'Ninguna campaña en curso', tono: agotados.length ? 'atencion' : 'ok', accion: agotados.length ? 'Crear campaña' : 'Ver campañas', ir: 'campanas' },
         { titulo: 'Datos de contacto', icono: PhoneOff, valor: sinCel, unidad: 'sin celular válido', detalle: 'Complétalo o usa correo / apoderado', tono: sinCel ? 'atencion' : 'ok', accion: 'Ver pacientes', ir: 'pacientes' },
-        { titulo: 'Agenda del software', icono: FileSpreadsheet, unidad: `Datos al corte del ${fechaCorta(hoy)}`, detalle: 'Sube los Excel nuevos del software; lo trabajado se conserva', tono: 'ok', accion: 'Cargar Excel nuevo', ir: 'cargar' },
+        { titulo: 'Agenda del software', icono: FileSpreadsheet, unidad: `Cargada ${haceTexto(horasDesdeCarga(d.ultimaCarga))}`, detalle: horasDesdeCarga(d.ultimaCarga) > AGENDA_VIEJA_H ? 'Carga el Excel de hoy: así la agenda libre no ofrece horarios que ya se ocuparon' : 'Al día. Lo trabajado se conserva al recargar', tono: horasDesdeCarga(d.ultimaCarga) > AGENDA_VIEJA_H ? 'atencion' : 'ok', accion: 'Cargar Excel nuevo', ir: 'cargar' },
       ],
       lecturas: [
         {
@@ -481,74 +486,6 @@ const RESUMEN: Record<Rol, (d: Datos, hoy: string) => Resumen> = {
         },
         motivos(pacientes),
         recuperados(pacientes, hoy, 'Volvieron'),
-      ],
-    };
-  },
-
-  mercadeo: (d) => {
-    const { pacientes, campanas } = d;
-    const aud = (id: string) => {
-      const ps = pacientes.filter(AUDIENCIAS.find((a) => a.id === id)!.filtro);
-      return { n: ps.length, cel: ps.filter((p) => p.telefono).length };
-    };
-    const agotados = aud('agotado');
-    const casosAgotados = contar(Object.keys(CASO_TXT) as Paciente['caso'][], pacientes.filter((p) => p.estado === 'agotado').map((p) => p.caso)).map((x) => ({ k: CASO_TXT[x.k], v: x.v }));
-    const envios = campanas.flatMap((c) => c.envios);
-    const enviados = envios.filter((e) => e.estado === 'enviado' || e.estado === 'respondio');
-    const respondieron = envios.filter((e) => e.estado === 'respondio').length;
-    const activas = campanas.filter((c) => c.estado === 'enviando' || c.estado === 'programada' || c.estado === 'pausada');
-    const envActivas = activas.flatMap((c) => c.envios);
-    const segmento = (id: string, titulo: string, icono: LucideIcon, detalle: string, prioritario = false): Resp => {
-      const a = aud(id);
-      return { titulo, icono, valor: a.cel, desglose: id === 'agotado' && casosAgotados.length ? casosAgotados : undefined, unidad: 'con celular', detalle: `${detalle}${a.n - a.cel ? ` · ${a.n - a.cel} sin celular` : ''}`, tono: a.cel ? (prioritario ? 'urgente' : 'atencion') : 'ok', accion: 'Crear campaña', ir: 'campanas' };
-    };
-    return {
-      foco: agotados.cel
-        ? { texto: `${agotados.cel} pacientes terminaron el 3-7-15 sin responder: recepción te los entrega y son tu primera audiencia.`, accion: 'Crear campaña', ir: 'campanas' }
-        : { texto: 'elige un segmento y arma una campaña con los guiones oficiales.', accion: 'Ir a campañas', ir: 'campanas' },
-      resps: [
-        segmento('agotado', 'Sin respuesta tras 3-7-15', Send, 'Los entrega recepción al día 15', true),
-        segmento('diagnostico', 'Diagnóstico sin tratamiento', Stethoscope, 'Valorados que no iniciaron'),
-        segmento('pausa', 'Tratamiento en pausa', HeartPulse, 'Más de 30 días sin volver'),
-        segmento('flaires', 'Convenio FLAIRES', Megaphone, 'Bonos de limpieza del convenio'),
-        { titulo: 'Campañas en curso', icono: Megaphone, valor: activas.length, unidad: activas.length === 1 ? 'campaña' : 'campañas', detalle: envActivas.length ? `${envActivas.filter((e) => e.estado !== 'pendiente').length} de ${envActivas.length} mensajes enviados` : 'Ninguna enviándose ahora', tono: 'ok', avance: envActivas.length ? [envActivas.filter((e) => e.estado !== 'pendiente').length, envActivas.length] : undefined, accion: 'Ver campañas', ir: 'campanas' },
-      ],
-      lecturas: [
-        {
-          titulo: 'Respuesta',
-          vacia: !enviados.length,
-          texto: enviados.length ? (
-            <>
-              Respondió el <b>{Math.round((respondieron / enviados.length) * 100)} %</b> de {enviados.length} mensajes enviados.
-            </>
-          ) : (
-            <>Aún no hay mensajes enviados. La respuesta de cada campaña aparecerá aquí.</>
-          ),
-          barras: campanas
-            .filter((c) => c.envios.some((e) => e.estado !== 'pendiente'))
-            .slice(0, 4)
-            .map((c) => {
-              const env = c.envios.filter((e) => e.estado === 'enviado' || e.estado === 'respondio').length;
-              const pct = env ? Math.round((c.envios.filter((e) => e.estado === 'respondio').length / env) * 100) : 0;
-              return { k: c.nombre, v: pct, txt: `${pct} %` };
-            }),
-        },
-        {
-          titulo: 'Dónde hay más por recuperar',
-          texto: <>Pacientes con celular por segmento: empieza por el más grande que aún no tenga campaña.</>,
-          barras: AUDIENCIAS.map((a) => ({ k: a.titulo, v: aud(a.id).cel }))
-            .sort((a, b) => b.v - a.v)
-            .slice(0, 5),
-        },
-        {
-          titulo: 'Alcance',
-          vacia: !enviados.length,
-          texto: (
-            <>
-              Tus campañas han llegado a <b>{new Set(enviados.map((e) => e.pacienteId)).size}</b> pacientes distintos.
-            </>
-          ),
-        },
       ],
     };
   },

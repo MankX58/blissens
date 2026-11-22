@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { ArrowLeft, CalendarCheck, ChevronDown, Flag, Megaphone, MessageCircle, MessagesSquare, Plus, RotateCcw, Search, SlidersHorizontal, StickyNote, UserMinus } from 'lucide-react';
+import { ArrowLeft, CalendarCheck, ChevronDown, ChevronRight, Flag, Megaphone, MessageCircle, MessagesSquare, Plus, RotateCcw, Search, SlidersHorizontal, StickyNote, UserMinus, X } from 'lucide-react';
 import type { Antiguedad, Caso, Datos, Estado, Grupo, Paciente, Profesional, Segmento } from '../types';
 import { lineaDeTiempo, type TipoEvento } from '../lib/expediente';
 import {
@@ -15,16 +15,18 @@ import {
   fechaCorta,
   fechaQueToca,
   pasoActual,
+  porQueSemaforo,
+  PASO_TXT,
   semaforo,
   linkWhatsApp,
   pesos,
   pesosCorto,
   ultimoContacto,
 } from '../lib/reglas';
-import { Encabezado, EtiquetaEstado, Iniciales, Insignias, Meta, Modal, Pestanas, Punto, ComoSePrioriza, SEMAFORO_TXT, btnBorde, btnNegro, textoRiesgo } from '../components/ui';
+import { Encabezado, EtiquetaEstado, Iniciales, Insignias, Meta, Modal, Punto, ComoSePrioriza, SEMAFORO_TXT, btnBorde, btnChico, btnNegro, textoRiesgo } from '../components/ui';
 
 type FiltroEstado = 'todos' | Estado;
-type Orden = 'valor' | 'reciente' | 'nombre' | 'fallos';
+type Orden = 'proximo' | 'valor' | 'reciente' | 'nombre' | 'fallos';
 
 export function Pacientes({
   datos,
@@ -36,6 +38,7 @@ export function Pacientes({
   onReactivar,
   onDescartar,
   onCrear,
+  soloLectura = false,
 }: {
   datos: Datos;
   hoy: string;
@@ -46,6 +49,7 @@ export function Pacientes({
   onReactivar: (id: string) => void;
   onDescartar: (id: string) => void;
   onCrear: (p: Paciente) => void;
+  soloLectura?: boolean; // especialista: ve y deja notas; contactar y cambiar el seguimiento es de recepción
 }) {
   const p = abierto ? datos.pacientes.find((x) => x.id === abierto) : undefined;
   if (p)
@@ -59,31 +63,57 @@ export function Pacientes({
         onNota={onNota}
         onReactivar={onReactivar}
         onDescartar={onDescartar}
+        soloLectura={soloLectura}
       />
     );
-  return <Lista pacientes={datos.pacientes} hoy={hoy} onAbrir={onAbrir} onCrear={onCrear} />;
+  return <Lista pacientes={datos.pacientes} hoy={hoy} onAbrir={onAbrir} onCrear={onCrear} soloLectura={soloLectura} />;
+}
+
+const ETIQUETAS: [string, string][] = [
+  ['VIP', 'VIP'],
+  ['Valoración virtual', 'Valoración virtual'],
+  ['Rehabilitación', 'Rehabilitación'],
+  ['Alineadores', 'Alineadores'],
+  ['Convenio FLAIRES', 'Convenio FLAIRES'],
+  ['sincel', 'Sin celular'],
+];
+
+function Campo({ t, children }: { t: string; children: ReactNode }) {
+  return (
+    <label className="block text-xs font-medium text-muted">
+      {t}
+      <span className="mt-1 block">{children}</span>
+    </label>
+  );
 }
 
 // ---------------- lista ----------------
-function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; hoy: string; onAbrir: (id: string) => void; onCrear: (p: Paciente) => void }) {
+function Lista({ pacientes, hoy, onAbrir, onCrear, soloLectura }: { pacientes: Paciente[]; hoy: string; onAbrir: (id: string) => void; onCrear: (p: Paciente) => void; soloLectura: boolean }) {
   const [estado, setEstado] = useState<FiltroEstado>('todos');
   const [caso, setCaso] = useState<Caso | ''>('');
-  const [segmento, setSegmento] = useState<Segmento | ''>('');
   const [grupo, setGrupo] = useState<Grupo | 0>(0);
   const [antiguedad, setAntiguedad] = useState<Antiguedad | ''>('');
   const [riesgo, setRiesgo] = useState(false);
   const [etiqueta, setEtiqueta] = useState('');
-  const [orden, setOrden] = useState<Orden>('reciente');
+  const [orden, setOrden] = useState<Orden>('proximo');
   const [q, setQ] = useState('');
   const [nuevo, setNuevo] = useState(false);
-  const activos = [caso, grupo, antiguedad, etiqueta, riesgo, segmento].filter(Boolean).length;
+  const [verFiltros, setVerFiltros] = useState(false);
+  type Chip = [string, () => void];
+  const chips: Chip[] = [
+    ...(caso ? [[CASO_TXT[caso], () => setCaso('')] as Chip] : []),
+    ...(grupo ? [[GRUPO_TXT[grupo], () => setGrupo(0)] as Chip] : []),
+    ...(antiguedad ? [[antiguedad === 'Nuevo' ? 'Solo nuevos' : 'Solo antiguos', () => setAntiguedad('')] as Chip] : []),
+    ...(etiqueta ? [[ETIQUETAS.find(([v]) => v === etiqueta)?.[1] ?? etiqueta, () => setEtiqueta('')] as Chip] : []),
+    ...(riesgo ? [['Riesgo alto', () => setRiesgo(false)] as Chip] : []),
+  ];
+  const activos = [caso, grupo, antiguedad, etiqueta, riesgo].filter(Boolean).length;
   const limpiar = () => {
     setCaso('');
     setGrupo(0);
     setAntiguedad('');
     setEtiqueta('');
     setRiesgo(false);
-    setSegmento('');
   };
 
   const n = (e: Estado) => pacientes.filter((p) => p.estado === e).length;
@@ -94,7 +124,6 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
         (p) =>
           (estado === 'todos' || p.estado === estado) &&
           (!caso || p.caso === caso) &&
-          (!segmento || p.segmento === segmento) &&
           (!grupo || p.grupo === grupo) &&
           (!antiguedad || p.antiguedad === antiguedad) &&
           (!riesgo || p.fallosSeguidos >= 3) &&
@@ -108,139 +137,203 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
             ? a.nombre.localeCompare(b.nombre)
             : orden === 'fallos'
               ? b.fallosSeguidos - a.fallosSeguidos || b.fallosHistoricos - a.fallosHistoricos
+            : orden === 'proximo'
+              ? (fechaQueToca(a, hoy) ?? '9').localeCompare(fechaQueToca(b, hoy) ?? '9') || b.valor - a.valor
             : (ultimoContacto(b)?.fecha ?? b.fechaEvento).localeCompare(ultimoContacto(a)?.fecha ?? a.fechaEvento)
       );
-  }, [pacientes, estado, caso, segmento, grupo, antiguedad, riesgo, etiqueta, orden, q]);
+  }, [pacientes, hoy, estado, caso, grupo, antiguedad, riesgo, etiqueta, orden, q]);
 
   return (
     <div>
       <Encabezado
         titulo="Pacientes"
-        descripcion="El expediente de seguimiento de cada paciente: por qué entró a la lista, cada intento de contacto, campañas, citas y notas."
+        descripcion="Todos los pacientes que la app sigue. Toca uno para ver su historia: por qué entró a la lista, cada mensaje que se le envió y cómo terminó."
       >
-        <button onClick={() => setNuevo(true)} className={btnNegro}>
-          <Plus className="size-4" /> Nuevo paciente
-        </button>
-      </Encabezado>
-
-      <div className="mt-8 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <Pestanas
-          valor={estado}
-          onCambio={setEstado}
-          opciones={[
-            ['todos', `Todos · ${pacientes.length}`],
-            ['pendiente', `En seguimiento · ${n('pendiente')}`],
-            ['recuperado', `Recuperados · ${n('recuperado')}`],
-            ['agotado', `Sin respuesta · ${n('agotado')}`],
-            ['descartado', `No les interesa · ${n('descartado')}`],
-            ['activo', `Activos con cita · ${n('activo')}`],
-          ]}
-        />
-        <label className="relative lg:w-72">
-          <span className="sr-only">Buscar paciente</span>
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden />
-          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nombre, # paciente, celular, correo" className="field rounded-full pl-10" />
-        </label>
-      </div>
-      {/* filtros secundarios plegados: la lista queda a la vista y se ve cuántos hay activos */}
-      <div className="mt-3 flex flex-wrap items-start gap-2">
-        <details className="group" open={activos > 0 || undefined}>
-          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-full bg-card px-3.5 py-2 text-xs font-semibold ring-1 ring-line hover:ring-ink/30 [&::-webkit-details-marker]:hidden">
-            <SlidersHorizontal className="size-3.5" aria-hidden />
-            Filtros
-            {activos > 0 && <span className="num rounded-full bg-ink px-1.5 text-[10px] leading-4 text-white">{activos}</span>}
-          </summary>
-          <div className="mt-2 flex flex-wrap gap-2">
-        <select value={caso} onChange={(e) => setCaso(e.target.value as Caso | '')} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Caso">
-          <option value="">Todos los casos</option>
-          {Object.entries(CASO_TXT).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
-        <select value={grupo} onChange={(e) => setGrupo(Number(e.target.value) as Grupo | 0)} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Segmento del SRS">
-          <option value={0}>Los 4 segmentos</option>
-          {([1, 2, 3, 4] as Grupo[]).map((g) => (
-            <option key={g} value={g}>
-              {g}. {GRUPO_TXT[g]}
-            </option>
-          ))}
-        </select>
-        <select value={antiguedad} onChange={(e) => setAntiguedad(e.target.value as Antiguedad | '')} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Antigüedad">
-          <option value="">Nuevos y antiguos</option>
-          <option value="Nuevo">Nuevos</option>
-          <option value="Antiguo">Antiguos</option>
-        </select>
-        <select value={etiqueta} onChange={(e) => setEtiqueta(e.target.value)} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Etiqueta">
-          <option value="">Todas las etiquetas</option>
-          {['VIP', 'Valoración virtual', 'Rehabilitación', 'Alineadores', 'Convenio FLAIRES'].map((e) => (
-            <option key={e}>{e}</option>
-          ))}
-          <option value="sincel">⚠️ Sin celular</option>
-        </select>
-        <button
-          onClick={() => setRiesgo((r) => !r)}
-          aria-pressed={riesgo}
-          className={`rounded-full px-3 py-1.5 text-xs font-semibold ${riesgo ? 'bg-rojo text-white' : 'bg-card text-ink/70 ring-1 ring-line'}`}
-        >
-          Riesgo alto
-        </button>
-        <select value={segmento} onChange={(e) => setSegmento(e.target.value as Segmento | '')} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Segmento">
-          <option value="">Todos los segmentos</option>
-          {Object.entries(SEGMENTO_TXT).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
-        {activos > 0 && (
-          <button onClick={limpiar} className="rounded-full px-3 py-1.5 text-xs font-semibold text-ink/70 underline underline-offset-2 hover:text-ink">
-            Quitar filtros
+        {!soloLectura && (
+          <button onClick={() => setNuevo(true)} className={btnNegro}>
+            <Plus className="size-4" /> Nuevo paciente
           </button>
         )}
-          </div>
-        </details>
-        <select value={orden} onChange={(e) => setOrden(e.target.value as Orden)} className="field w-auto rounded-full py-1.5 text-xs" aria-label="Ordenar">
-          <option value="reciente">Movimiento más reciente</option>
-          <option value="valor">Mayor valor</option>
-          <option value="nombre">Nombre A-Z</option>
-          <option value="fallos">Más fallos históricos</option>
-        </select>
+      </Encabezado>
+
+      {/* una sola barra: buscar, filtrar y ordenar */}
+      <div className="mt-8 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <label className="relative flex-1">
+          <span className="sr-only">Buscar paciente</span>
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nombre, # o celular" className="field rounded-full pl-10" />
+        </label>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setVerFiltros((v) => !v)}
+            aria-expanded={verFiltros}
+            className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold ring-1 ${verFiltros || activos ? 'bg-ink text-white ring-ink' : 'bg-card text-ink/75 ring-line hover:text-ink'}`}
+          >
+            <SlidersHorizontal className="size-4" aria-hidden />
+            Filtros
+            {activos > 0 && <span className="num rounded-full bg-white px-1.5 text-[11px] leading-4 text-ink">{activos}</span>}
+          </button>
+          <label className="relative min-w-0 flex-1 sm:flex-none">
+            <span className="sr-only">Ordenar</span>
+            <select value={orden} onChange={(e) => setOrden(e.target.value as Orden)} className="field rounded-full py-2.5 text-sm sm:w-56">
+              <option value="proximo">A quién toca primero</option>
+              <option value="reciente">Movimiento más reciente</option>
+              <option value="valor">Mayor valor</option>
+              <option value="nombre">Nombre A-Z</option>
+              <option value="fallos">Más citas incumplidas</option>
+            </select>
+          </label>
+        </div>
       </div>
 
-      <div className="card mt-5 overflow-hidden">
-        <div className="hidden grid-cols-[2fr_1.3fr_1fr_1fr_.9fr] gap-4 border-b border-line px-5 py-3 md:grid">
-          {['Paciente', 'Caso', 'Proceso 3-7-15', 'Estado', 'Valor'].map((t) => (
-            <span key={t} className="kicker">
+      {verFiltros && (
+        <div className="hoja card mt-3 p-4 sm:p-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Campo t="Por qué está en la lista">
+              <select value={caso} onChange={(e) => setCaso(e.target.value as Caso | '')} className="field py-2 text-sm">
+                <option value="">Todos los casos</option>
+                {Object.entries(CASO_TXT).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+            <Campo t="Dónde quedó en la agenda">
+              <select value={grupo} onChange={(e) => setGrupo(Number(e.target.value) as Grupo | 0)} className="field py-2 text-sm">
+                <option value={0}>Todos</option>
+                {([1, 2, 3, 4] as Grupo[]).map((g) => (
+                  <option key={g} value={g}>
+                    {GRUPO_TXT[g]}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+            <Campo t="Paciente">
+              <select value={antiguedad} onChange={(e) => setAntiguedad(e.target.value as Antiguedad | '')} className="field py-2 text-sm">
+                <option value="">Nuevos y antiguos</option>
+                <option value="Nuevo">Solo nuevos</option>
+                <option value="Antiguo">Solo antiguos</option>
+              </select>
+            </Campo>
+            <Campo t="Etiqueta">
+              <select value={etiqueta} onChange={(e) => setEtiqueta(e.target.value)} className="field py-2 text-sm">
+                <option value="">Todas</option>
+                {ETIQUETAS.map(([v, t]) => (
+                  <option key={v} value={v}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" checked={riesgo} onChange={(e) => setRiesgo(e.target.checked)} className="size-4 accent-ink" />
+              Solo riesgo alto <span className="text-muted">(3 o más citas seguidas sin asistir)</span>
+            </label>
+            <div className="flex gap-2">
+              {activos > 0 && (
+                <button onClick={limpiar} className={`${btnChico} text-muted hover:text-ink`}>
+                  Quitar filtros
+                </button>
+              )}
+              <button onClick={() => setVerFiltros(false)} className={`${btnChico} bg-ink text-white`}>
+                Listo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* estados: solo los que tienen pacientes; se acomodan sin cortarse */}
+      <div className="mt-4 flex flex-wrap items-center gap-1.5" role="group" aria-label="Estado del seguimiento">
+        {(
+          [
+            ['todos', 'Todos', pacientes.length],
+            ['pendiente', 'En seguimiento', n('pendiente')],
+            ['recuperado', 'Recuperados', n('recuperado')],
+            ['agotado', 'Sin respuesta', n('agotado')],
+            ['descartado', 'No les interesa', n('descartado')],
+            ['activo', 'Activos con cita', n('activo')],
+          ] as [FiltroEstado, string, number][]
+        )
+          .filter(([id, , c]) => id === 'todos' || c > 0 || estado === id)
+          .map(([id, t, c]) => (
+            <button
+              key={id}
+              onClick={() => setEstado(id)}
+              aria-pressed={estado === id}
+              className={`rounded-full px-3.5 py-1.5 text-[13px] font-semibold ${estado === id ? 'bg-ink text-white' : 'bg-card text-ink/70 ring-1 ring-line hover:text-ink'}`}
+            >
+              {t} <span className={`num ${estado === id ? 'text-white/60' : 'text-muted'}`}>{c}</span>
+            </button>
+          ))}
+        {/* filtros activos a la vista: cada uno se quita con su X */}
+        {chips.map(([t, quitar]) => (
+          <span key={t} className="inline-flex items-center gap-1 rounded-full bg-sky/25 py-1 pl-3 pr-1 text-[13px] font-medium">
+            {t}
+            <button onClick={quitar} aria-label={`Quitar filtro ${t}`} className="grid size-5 place-items-center rounded-full hover:bg-white">
+              <X className="size-3.5" aria-hidden />
+            </button>
+          </span>
+        ))}
+      </div>
+
+      <p className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+        <span className="font-medium text-ink/70">Mensajes 3-7-15:</span>
+        {[
+          ['iris', 'agendó cita'],
+          ['bg-ink', 'enviado, sin cita aún'],
+          ['bg-rojo', 'no le interesa'],
+          ['bg-line', 'por enviar'],
+        ].map(([c, t]) => (
+          <span key={t} className="flex items-center gap-1.5">
+            <span className={`h-2 w-4 rounded-full ${c}`} aria-hidden /> {t}
+          </span>
+        ))}
+        <span className="ml-auto">
+          {visibles.length.toLocaleString('es-CO')} {visibles.length === 1 ? 'paciente' : 'pacientes'}
+        </span>
+      </p>
+      <div className="card mt-2 overflow-hidden">
+        <div className="hidden grid-cols-[2fr_1.4fr_1fr_1.1fr_.7fr_1rem] gap-4 border-b border-line px-5 py-3 xl:grid">
+          {['Paciente', 'Por qué está en la lista', 'Mensajes 3-7-15', 'Estado', 'Valor', ''].map((t, i) => (
+            <span key={i} className={`kicker ${t === 'Valor' ? 'text-right' : ''}`}>
               {t}
             </span>
           ))}
         </div>
-        <ul key={estado + caso + segmento + grupo + antiguedad + etiqueta + orden} className="escalonado divide-y divide-line">
+        <ul key={estado + caso + grupo + antiguedad + etiqueta + orden} className="escalonado divide-y divide-line">
           {visibles.map((p) => (
             <li key={p.id}>
               <button
                 onClick={() => onAbrir(p.id)}
-                className="grid w-full grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 px-5 py-4 text-left hover:bg-soft/60 md:grid-cols-[2fr_1.3fr_1fr_1fr_.9fr] md:gap-4"
+                className="group grid w-full grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 px-5 py-4 text-left hover:bg-soft/60 xl:grid-cols-[2fr_1.4fr_1fr_1.1fr_.7fr_1rem] xl:gap-4"
               >
                 <span className="flex min-w-0 items-center gap-3">
                   <Iniciales nombre={p.nombre} />
                   <span className="min-w-0">
-                    <span className="block truncate font-semibold">{p.nombre}</span>
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span className="truncate text-[15px] font-semibold">{p.nombre}</span>
+                      <Insignias p={p} />
+                    </span>
                     <Meta p={p} className="block truncate" />
                   </span>
                 </span>
-                <span className="min-w-0 text-sm">
+                <span className="col-span-2 min-w-0 text-sm xl:col-span-1">
                   <span className="block truncate">{CASO_TXT[p.caso]}</span>
                   <span className="block truncate text-xs text-muted">{p.tratamiento}</span>
                 </span>
-                <MiniProceso p={p} />
-                <span className="flex flex-wrap gap-1">
-                  <EtiquetaEstado estado={p.estado} />
-                  <Insignias p={p} />
+                <span className="num col-start-2 row-start-1 text-sm font-semibold xl:col-start-5 xl:text-right">{p.valor ? pesosCorto(p.valor) : '—'}</span>
+                <span className="col-span-2 flex items-center gap-3 xl:contents">
+                  <MiniProceso p={p} />
+                  <span className="min-w-0">
+                    <EtiquetaEstado estado={p.estado} />
+                    <Siguiente p={p} hoy={hoy} />
+                  </span>
                 </span>
-                <span className="num text-sm font-semibold md:text-right">{p.valor ? pesosCorto(p.valor) : '—'}</span>
+                <ChevronRight className="hidden size-4 text-ink/30 transition-transform group-hover:translate-x-0.5 group-hover:text-ink/60 xl:block" aria-hidden />
               </button>
             </li>
           ))}
@@ -260,6 +353,13 @@ function Lista({ pacientes, hoy, onAbrir, onCrear }: { pacientes: Paciente[]; ho
       />
     </div>
   );
+}
+
+// qué sigue con este paciente, en una frase corta
+function Siguiente({ p, hoy }: { p: Paciente; hoy: string }) {
+  const f = fechaQueToca(p, hoy);
+  if (!f) return null;
+  return <span className={`mt-0.5 block text-xs ${f <= hoy ? 'font-semibold text-rojo' : 'text-muted'}`}>{f <= hoy ? 'Toca contactar hoy' : `Próximo mensaje: ${fechaCorta(f)}`}</span>;
 }
 
 function MiniProceso({ p }: { p: Paciente }) {
@@ -294,6 +394,7 @@ function Expediente({
   onNota,
   onReactivar,
   onDescartar,
+  soloLectura,
 }: {
   p: Paciente;
   datos: Datos;
@@ -303,6 +404,7 @@ function Expediente({
   onNota: (id: string, texto: string) => void;
   onReactivar: (id: string) => void;
   onDescartar: (id: string) => void;
+  soloLectura: boolean;
 }) {
   const [nota, setNota] = useState('');
   const eventos = lineaDeTiempo(p, datos.huecos, datos.campanas, datos.citas);
@@ -338,6 +440,11 @@ function Expediente({
               </p>
             </div>
           </div>
+          {soloLectura ? (
+            <p className="max-w-56 shrink-0 rounded-2xl bg-soft px-3.5 py-2.5 text-xs leading-relaxed text-ink/75">
+              Recepción se encarga de contactarlo. Si quieres orientar el contacto, déjale una nota en la historia.
+            </p>
+          ) : (
           <div className="flex shrink-0 flex-wrap gap-2">
             {p.estado === 'pendiente' && (
               <button onClick={() => onContactar(p)} className={btnNegro}>
@@ -355,14 +462,16 @@ function Expediente({
               </a>
             )}
           </div>
+          )}
         </div>
 
         <dl className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-line lg:grid-cols-4">
           <Clave k="Etapa">
             <span className="flex items-center gap-2">
               {color && <Punto color={color} />}
-              {paso ? `${color ? SEMAFORO_TXT[color] : ''} · día ${paso}` : ESTADO_TXT[p.estado]}
+              {paso ? `${color ? SEMAFORO_TXT[color] : ''} · ${PASO_TXT[paso]}` : ESTADO_TXT[p.estado]}
             </span>
+            {color && <span className="mt-0.5 block text-xs font-normal text-muted">{porQueSemaforo(p, hoy)}</span>}
             <ProcesoMini p={p} paso={paso} />
           </Clave>
           <Clave k={p.estado === 'pendiente' ? 'Siguiente contacto' : 'Cierre'}>
@@ -471,7 +580,7 @@ function Expediente({
             <p className="mt-3 text-xs text-muted">{textoRiesgo(p)}.</p>
             <ComoSePrioriza className="mt-2" />
           </details>
-          {p.estado === 'pendiente' && (
+          {p.estado === 'pendiente' && !soloLectura && (
             <button onClick={() => onDescartar(p.id)} className="mt-5 inline-flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-rojo">
               <UserMinus className="size-3.5" aria-hidden /> Sacar del seguimiento
             </button>

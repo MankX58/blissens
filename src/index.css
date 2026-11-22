@@ -85,11 +85,15 @@
 @keyframes aura { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(-8%, 6%) scale(1.15); } }
 @keyframes hoja { from { opacity: 0; transform: translateY(16px) scale(.985); } }
 @keyframes cajon { from { transform: translateX(-100%); } }
+@keyframes sello { 0% { opacity: 0; transform: rotate(-10deg) scale(1.9); } 60% { opacity: 1; transform: rotate(-10deg) scale(.94); } 100% { transform: rotate(-10deg) scale(1); } }
 
 .entrar { animation: entrar .5s cubic-bezier(.2, .8, .2, 1) both; }
 .hoja { animation: hoja .28s cubic-bezier(.2, .8, .2, 1) both; }
 .fondo { animation: aparecer .2s ease-out both; }
 .cajon { animation: cajon .25s cubic-bezier(.2, .8, .2, 1) both; }
+/* cupo ocupado en el software: un sello que cae y un rayado como en una agenda de papel */
+.sello { animation: sello .45s cubic-bezier(.2, .8, .2, 1) both; }
+.rayado { background-image: repeating-linear-gradient(135deg, rgb(0 0 0 / .05) 0 7px, transparent 7px 14px); }
 .pop { animation: pop .35s cubic-bezier(.2, .8, .2, 1) both; }
 .latido { animation: latido 1.6s ease-out infinite; }
 .crecer-x { transform-origin: left; animation: crecer-x .9s cubic-bezier(.2, .8, .2, 1) both; }

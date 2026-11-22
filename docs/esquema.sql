@@ -52,7 +52,7 @@ CREATE TABLE agenda_libre (
 	confirmado_el DATE, 
 	id_profesional INTEGER, 
 	id_sillon INTEGER, 
-	asignado_por VARCHAR, 
+	asignado_por VARCHAR, "origen" VARCHAR(20) NOT NULL DEFAULT 'manual', "verificacion" VARCHAR(10), 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(ocupado_por) REFERENCES pacientes (numero_paciente) ON DELETE SET NULL, 
 	FOREIGN KEY(id_profesional) REFERENCES profesionales (id_profesional), 
@@ -75,6 +75,18 @@ CREATE TABLE aranceles (
 	nombre VARCHAR(80) NOT NULL, 
 	PRIMARY KEY (id_arancel), 
 	UNIQUE (nombre)
+);
+
+CREATE TABLE ausencias (
+	id INTEGER NOT NULL, 
+	user_id VARCHAR NOT NULL, 
+	desde DATE NOT NULL, 
+	hasta DATE NOT NULL, 
+	motivo VARCHAR(60) NOT NULL, 
+	registrado_por VARCHAR, 
+	PRIMARY KEY (id), 
+	FOREIGN KEY(user_id) REFERENCES user (id) ON DELETE CASCADE, 
+	FOREIGN KEY(registrado_por) REFERENCES user (id) ON DELETE SET NULL
 );
 
 CREATE TABLE campanas (
@@ -255,6 +267,15 @@ CREATE TABLE guiones (
 	PRIMARY KEY (id)
 );
 
+CREATE TABLE horarios_profesional (
+	id INTEGER NOT NULL, 
+	profesional VARCHAR(120) NOT NULL, 
+	dia_semana INTEGER NOT NULL, 
+	inicio VARCHAR(5) NOT NULL, 
+	fin VARCHAR(5) NOT NULL, 
+	PRIMARY KEY (id)
+);
+
 CREATE TABLE notas_paciente (
 	id INTEGER NOT NULL, 
 	numero_paciente INTEGER NOT NULL, 
@@ -339,6 +360,14 @@ CREATE TABLE pacientes (
 	numero_ultima_cita INTEGER, "motivo_vip" VARCHAR(80), 
 	PRIMARY KEY (numero_paciente), 
 	FOREIGN KEY(id_apoderado) REFERENCES apoderados (id_apoderado) ON DELETE SET NULL
+);
+
+CREATE TABLE pausas_agenda (
+	id INTEGER NOT NULL, 
+	nombre VARCHAR(60) NOT NULL, 
+	inicio VARCHAR(5) NOT NULL, 
+	fin VARCHAR(5) NOT NULL, 
+	PRIMARY KEY (id)
 );
 
 CREATE TABLE profesionales (
@@ -446,6 +475,8 @@ CREATE INDEX ix_agenda_libre_ocupado_por ON agenda_libre (ocupado_por);
 
 CREATE INDEX ix_agenda_libre_profesional ON agenda_libre (profesional);
 
+CREATE INDEX ix_ausencias_user_id ON ausencias (user_id);
+
 CREATE INDEX ix_campanas_estado ON campanas (estado);
 
 CREATE INDEX ix_ciclos_seguimiento_numero_paciente ON ciclos_seguimiento (numero_paciente);
@@ -477,6 +508,8 @@ CREATE INDEX ix_envios_campana_numero_paciente ON envios_campana (numero_pacient
 CREATE INDEX ix_guiones_categoria ON guiones (categoria);
 
 CREATE UNIQUE INDEX ix_guiones_fila_excel ON guiones (fila_excel);
+
+CREATE INDEX ix_horarios_profesional_profesional ON horarios_profesional (profesional);
 
 CREATE INDEX ix_notas_paciente_numero_paciente ON notas_paciente (numero_paciente);
 
