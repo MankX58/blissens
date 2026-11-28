@@ -90,11 +90,11 @@ export function Hoy({
 
   return (
     <>
-      <section className="entrar relative overflow-hidden rounded-[28px] bg-ink px-6 py-6 text-white sm:px-8 sm:py-7">
+      <section className="entrar relative overflow-hidden rounded-[24px] bg-ink px-5 py-5 text-white sm:rounded-[28px] sm:px-8 sm:py-7">
         <div className="aura iris pointer-events-none absolute -right-24 -top-32 size-[420px] rounded-full opacity-35 blur-3xl" />
         <div className="relative">
-          <p className="text-sm text-white/65">{fecha[0].toUpperCase() + fecha.slice(1)}</p>
-          <h1 className="mt-1.5 text-[30px] font-bold leading-[1.08] tracking-tight sm:text-[40px]">
+          <p className="text-xs text-white/65 sm:text-sm">{fecha[0].toUpperCase() + fecha.slice(1)}</p>
+          <h1 className="mt-1 text-[24px] font-bold leading-[1.1] tracking-tight sm:mt-1.5 sm:text-[40px] sm:leading-[1.08]">
             {delDia.length === 0 ? (
               'Lista del día al día'
             ) : (
@@ -104,13 +104,13 @@ export function Hoy({
             )}
           </h1>
           {enJuego > 0 && (
-            <p className="mt-1 text-[15px] text-white/70">
-              Sus tratamientos suman <b className="text-white"><Cifra valor={enJuego} formato={pesosCorto} /></b>: cada cita que se recupere cuenta.
+            <p className="mt-1 text-sm text-white/70 sm:text-[15px]">
+              Sus tratamientos suman <b className="text-white"><Cifra valor={enJuego} formato={pesosCorto} /></b><span className="hidden sm:inline">: cada cita que se recupere cuenta</span>.
             </p>
           )}
 
           {total > 0 && (
-            <div className="mt-5 max-w-xl">
+            <div className="mt-4 max-w-xl sm:mt-5">
               <p className="text-sm text-white/70">
                 <b className="text-white">{hechosHoy.length}</b> de {total} contactados hoy
               </p>
@@ -121,7 +121,7 @@ export function Hoy({
           )}
 
           {delDia.length > 0 && (
-            <ol className="mt-6 grid gap-2 text-sm sm:grid-cols-3">
+            <ol className="mt-6 hidden gap-2 text-sm sm:grid sm:grid-cols-3">
               {['Empieza por el primero: la lista ya viene ordenada', 'Toca «Contactar» y envía el mensaje por WhatsApp', 'Anota qué respondió: la app agenda el siguiente paso'].map((t, i) => (
                 <li key={t} className="flex items-start gap-2.5 rounded-2xl bg-white/[.07] px-3.5 py-3">
                   <span className="num grid size-6 shrink-0 place-items-center rounded-full bg-white text-xs font-bold text-ink">{i + 1}</span>
@@ -136,7 +136,7 @@ export function Hoy({
       {delDia.length > 0 && (
         <>
           {/* cada color es un filtro y dice en palabras qué significa */}
-          <div className="mt-6" role="group" aria-label="Filtrar por urgencia">
+          <div className="mt-4 sm:mt-6" role="group" aria-label="Filtrar por urgencia">
             <div className="escalonado grid grid-cols-3 gap-2 sm:gap-3">
               {COLORES.map((c) => {
                 const activo = filtro === c;
@@ -146,14 +146,14 @@ export function Hoy({
                     onClick={() => elegir(activo ? 'todos' : c)}
                     aria-pressed={activo}
                     title={`${SEMAFORO_INFO[c].quienes} ${SEMAFORO_INFO[c].hacer}`}
-                    className={`card flex flex-col items-start rounded-[20px] p-3 text-left sm:p-4 ${activo ? 'ring-2 ring-ink' : 'hover:ring-1 hover:ring-ink/25'}`}
+                    className={`card flex flex-col items-start rounded-[18px] px-3 py-2.5 text-left sm:rounded-[20px] sm:p-4 ${activo ? 'ring-2 ring-ink' : 'hover:ring-1 hover:ring-ink/25'}`}
                   >
                     <span className="flex items-center gap-2">
                       <Punto color={c} />
                       <span className="text-sm font-semibold">{SEMAFORO_TXT[c]}</span>
                     </span>
-                    <span className="num mt-1.5 text-2xl font-bold leading-none">{cuenta[c]}</span>
-                    <span className="mt-1 text-xs leading-snug text-muted">{SEMAFORO_INFO[c].corto}</span>
+                    <span className="num mt-1 text-xl font-bold leading-none sm:mt-1.5 sm:text-2xl">{cuenta[c]}</span>
+                    <span className="mt-1 hidden text-xs leading-snug text-muted sm:block">{SEMAFORO_INFO[c].corto}</span>
                   </button>
                 );
               })}
@@ -176,22 +176,22 @@ export function Hoy({
               </div>
             ) : (
               <>
-                <p className="mt-3 text-xs text-muted">Toca un color para ver solo esos pacientes y qué hacer con ellos.</p>
+                <p className="mt-3 hidden text-xs text-muted sm:block">Toca un color para ver solo esos pacientes y qué hacer con ellos.</p>
                 <ComoSePrioriza className="mt-1.5" />
               </>
             )}
           </div>
 
           <div className="mb-4 mt-7 flex flex-col gap-3">
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex gap-2">
               <label className="relative flex-1">
                 <span className="sr-only">Buscar en la lista del día</span>
                 <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" aria-hidden />
                 <input type="search" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar paciente" className="field rounded-full pl-10" />
               </label>
               <label className="flex items-center gap-2 text-sm text-muted">
-                <span className="shrink-0">Ordenar por</span>
-                <select value={orden} onChange={(e) => setOrden(e.target.value as Orden)} className="field rounded-full sm:w-44">
+                <span className="hidden shrink-0 sm:inline">Ordenar por</span>
+                <select value={orden} onChange={(e) => setOrden(e.target.value as Orden)} aria-label="Ordenar por" className="field w-32 rounded-full sm:w-44">
                   <option value="prioridad">Prioridad</option>
                   <option value="valor">Mayor valor</option>
                   <option value="antiguedad">Más días esperando</option>
@@ -303,20 +303,20 @@ function Fila({ p, hoy, primero, onContactar, onAbrir }: { p: Paciente; hoy: str
   const paso = pasoActual(p, hoy)!;
   const dias = diasEntre(p.fechaEvento, hoy);
   return (
-    <li className={`card lift grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-3 rounded-[22px] p-4 sm:grid-cols-[auto_1fr_auto_auto] sm:p-5 ${primero ? 'ring-2 ring-ink' : ''}`}>
+    <li className={`card lift grid grid-cols-[auto_1fr_auto] items-start gap-x-3 gap-y-3 rounded-[22px] p-4 sm:grid-cols-[auto_1fr_auto_auto] sm:items-center sm:gap-x-4 sm:p-5 ${primero ? 'ring-2 ring-ink' : ''}`}>
       <button onClick={onAbrir} className="relative" aria-label={`Ver expediente de ${p.nombre}`}>
         <Iniciales nombre={p.nombre} />
         <Punto color={color} className="absolute -right-0.5 -top-0.5 ring-2 ring-white" />
       </button>
-      <div className="min-w-0">
+      <div className="col-span-2 min-w-0 sm:col-span-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          {primero && <span className="mr-1 rounded-full bg-ink px-2 py-0.5 text-[11px] font-semibold text-white">Empieza aquí</span>}
+          {primero && <span className="mr-1 hidden rounded-full bg-ink px-2 py-0.5 text-[11px] font-semibold text-white sm:inline">Empieza aquí</span>}
           <button onClick={onAbrir} className="mr-1 truncate text-left text-[15px] font-semibold hover:underline">
             {p.nombre}
           </button>
           <Insignias p={p} hoy={hoy} />
         </div>
-        <p className="mt-0.5 text-sm text-ink/75">
+        <p className="mt-0.5 truncate text-sm text-ink/75 sm:whitespace-normal">
           <b className="font-medium text-ink">{CASO_TXT[p.caso]}</b>
           {dias > 0 ? <> hace {dias} {dias === 1 ? 'día' : 'días'}</> : ' hoy'}
           {p.tratamiento && <span className="text-ink/60"> · {p.tratamiento}</span>}
@@ -330,22 +330,22 @@ function Fila({ p, hoy, primero, onContactar, onAbrir }: { p: Paciente; hoy: str
             </span>
           </p>
         )}
-        <Meta p={p} className="mt-0.5 block truncate" />
+        <Meta p={p} className="mt-0.5 hidden truncate sm:block" />
       </div>
-      <div className="col-span-2 flex items-center justify-between gap-4 text-sm sm:col-span-1 sm:block sm:text-right">
+      <div className="col-span-2 flex min-w-0 items-center gap-2 self-center whitespace-nowrap text-[13px] sm:col-span-1 sm:block sm:text-right sm:text-sm">
         <div className="flex items-center gap-1.5 sm:justify-end" aria-label={`${PASO_TXT[paso]} de 3`}>
           {[3, 7, 15].map((d) => (
-            <span key={d} className={`h-1.5 rounded-full ${d === paso ? 'iris w-6' : d < paso ? 'w-3 bg-ink' : 'w-3 bg-line'}`} aria-hidden />
+            <span key={d} className={`hidden h-1.5 rounded-full sm:inline-block ${d === paso ? 'iris w-6' : d < paso ? 'w-3 bg-ink' : 'w-3 bg-line'}`} aria-hidden />
           ))}
-          <span className="ml-1 font-medium">{PASO_TXT[paso]}</span>
+          <span className="font-medium sm:ml-1">{PASO_TXT[paso]}</span>
         </div>
-        <p className="mt-0.5 text-xs text-muted">
+        <p className="truncate text-xs text-muted sm:mt-0.5"><span className="sm:hidden">· </span>
           {atraso > 0 && <span className="font-semibold text-rojo">{atraso} {atraso === 1 ? 'día' : 'días'} de retraso · </span>}
           <span className="num">{pesosCorto(p.valor)}</span>
         </p>
       </div>
-      <button onClick={onContactar} className={`${btnNegro} group col-span-2 sm:col-span-1`}>
-        Contactar <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+      <button onClick={onContactar} className={`${btnNegro} group self-center px-4 py-2 sm:px-5 sm:py-2.5`}>
+        Contactar <ArrowRight className="hidden size-4 transition-transform group-hover:translate-x-0.5 sm:block" />
       </button>
     </li>
   );

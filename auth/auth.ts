@@ -9,6 +9,7 @@
 // Sin registro público: dirección crea las cuentas desde la pantalla "Cuentas"; con Google solo entra
 // quien ya tiene cuenta con ese correo (disableImplicitSignUp).
 import { DatabaseSync } from 'node:sqlite';
+import { Pool } from 'pg';
 import { betterAuth } from 'better-auth';
 import { admin } from 'better-auth/plugins';
 import { ac, permisos } from '../src/lib/roles';
@@ -18,9 +19,17 @@ const google = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET;
 // separadas por comas; admite comodines: https://*.trycloudflare.com. Vacío = solo BETTER_AUTH_URL.
 export const origenesConfiables = (process.env.ORIGENES_CONFIABLES ?? '').split(',').map((o) => o.trim()).filter(Boolean);
 
+// Base de las cuentas, compartida con FastAPI:
+// - DATABASE_URL=postgres(ql)://… → PostgreSQL (p. ej. Neon, para desplegar en la nube)
+// - sin DATABASE_URL → el SQLite local de siempre (espera hasta 5 s si FastAPI está escribiendo; modo WAL)
+const urlBase = process.env.DATABASE_URL ?? '';
+const enPostgres = /^postgres(ql)?(\+\w+)?:\/\//.test(urlBase);
+const baseDeDatos = enPostgres
+  ? new Pool({ connectionString: urlBase.replace(/^postgresql\+\w+:/, 'postgresql:'), max: 5 })
+  : new DatabaseSync('backend/blissens.db', { timeout: 5000 });
+
 export const auth = betterAuth({
-  // la base la comparte con FastAPI: espera hasta 5 s si el otro proceso está escribiendo (la base está en modo WAL)
-  database: new DatabaseSync('backend/blissens.db', { timeout: 5000 }),
+  database: baseDeDatos,
   emailAndPassword: { enabled: true, disableSignUp: true },
   trustedOrigins: origenesConfiables,
   // especialistas: qué agenda es la suya ('Dra. Sara López' | 'Dr. Juan Manuel Olarte'); solo gerencia lo asigna

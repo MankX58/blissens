@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowRightLeft, Lock, CalendarSearch, Check, ChevronDown, Clock, FileSpreadsheet, MessageCircle, Phone, Plus, RotateCcw, Search, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
-import type { Datos, Franja, Hueco, Paciente, Pausa, Profesional } from '../types';
+import { ArrowRightLeft, CalendarDays, ChevronLeft, ChevronRight, List, Lock, CalendarSearch, Check, ChevronDown, Clock, MessageCircle, Phone, Plus, RotateCcw, Search, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
+import type { Cita, Datos, Franja, Hueco, Paciente, Pausa, Profesional } from '../types';
 import { api } from '../lib/api';
 import { resumenHorario } from './Cuentas';
 import { fechaLarga, guionHueco, horaLarga, oficial, rellenar, N_UBICACION } from '../lib/guiones';
-import { CASO_TXT, ESPECIALISTAS, ESTADO_TXT, esVIP, diasEntre, fechaCorta, linkWhatsApp, noContactar, pesosCorto, quiereAdelantar, riesgoAlto, sumarDias } from '../lib/reglas';
+import { CASO_TXT, DIAS_CUPOS, ESPECIALISTAS, ESTADO_TXT, esVIP, diasEntre, fechaCorta, linkWhatsApp, noContactar, pesosCorto, quiereAdelantar, riesgoAlto, sumarDias } from '../lib/reglas';
 import { Encabezado, Etiqueta, Iniciales, InsigniaRiesgo, Insignias, Vacio, btnBorde, btnChico, btnNegro } from '../components/ui';
 
 // ---------- estado de cada cupo: dice qué hay que hacer con él ----------
@@ -51,6 +51,11 @@ const horaFin = (h: Hueco) => {
   const [hh, mm] = h.hora.split(':').map(Number);
   const t = hh * 60 + mm + h.minutos;
   return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+};
+// «Hoy · 11 de noviembre» o «Miércoles, 11 de nov» (sin decir la fecha dos veces)
+const diaCompleto = (f: string, hoy: string) => {
+  const n = nombreDia(f, hoy);
+  return ['Hoy', 'Mañana', 'Ayer'].includes(n) ? `${n} · ${fechaLarga(f)}` : n;
 };
 const nombreDia = (f: string, hoy: string) => {
   if (f === hoy) return 'Hoy';
@@ -100,6 +105,7 @@ function candidatos(h: Hueco, pacientes: Paciente[], f: Filtros) {
 }
 
 interface Props {
+  citas: Cita[]; // las citas del software: el calendario las pinta para ver qué ya está agendado
   pacientes: Paciente[];
   huecos: Hueco[];
   hoy: string;
@@ -134,6 +140,22 @@ export function Agenda(props: Props) {
   const { huecos, hoy, pacientes } = props;
   const [form, setForm] = useState(false);
   const [historial, setHistorial] = useState(false);
+  // calendario (por defecto) o lista; se recuerda en este navegador
+  const [vista, setVista] = useState<'calendario' | 'lista'>(() => {
+    try {
+      return localStorage.getItem('blissens-agenda-vista') === 'lista' ? 'lista' : 'calendario';
+    } catch {
+      return 'calendario';
+    }
+  });
+  const cambiarVista = (v: 'calendario' | 'lista') => {
+    setVista(v);
+    try {
+      localStorage.setItem('blissens-agenda-vista', v);
+    } catch {
+      /* sin almacenamiento: dura hasta recargar */
+    }
+  };
   const detalle = useRef<HTMLDivElement>(null);
 
   const conEstado = useMemo(
@@ -158,7 +180,7 @@ export function Agenda(props: Props) {
   const elegir = (id?: string) => {
     if (!id) return;
     setSel(id);
-    if (window.innerWidth < 1024) setTimeout(() => detalle.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    if (window.innerWidth < 1024 || vista === 'calendario') setTimeout(() => detalle.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   };
 
   const agendados = huecos.filter((h) => h.ocupadoPor && h.fecha >= hoy);
@@ -175,6 +197,8 @@ export function Agenda(props: Props) {
     { e: ['confirmar'], t: 'Confirmar citas de mañana', d: 'Recordatorio 24 h antes', icono: ShieldCheck },
     { e: ['asistencia'], t: 'Registrar asistencia', d: 'Citas que ya pasaron', icono: UserCheck },
   ];
+  const pendientesLista = tareas.filter((t) => t.e.some((e) => n(e) > 0)).length;
+  const alDiaLista = tareas.filter((t) => !t.e.some((e) => n(e) > 0)).map((t) => t.t);
 
   return (
     <div>
@@ -182,8 +206,8 @@ export function Agenda(props: Props) {
         titulo={props.soloLectura ? 'Mi agenda libre' : 'Agenda libre'}
         descripcion={
           props.soloLectura
-            ? 'Tu tiempo libre de los próximos 14 días, calculado con tu horario, los descansos de la clínica y tus citas. Recepción ofrece estos cupos a tus pacientes pendientes.'
-            : 'El tiempo libre de cada especialista en los próximos 14 días: su horario menos los descansos, las citas agendadas y sus vacaciones. Elige un cupo, ofrécelo y confírmalo un día antes.'
+            ? 'Tu tiempo libre del próximo mes y una semana. Recepción lo ofrece a tus pacientes pendientes.'
+            : 'Cupos libres del próximo mes y una semana, ya sin descansos, citas ni vacaciones. Elige uno, ofrécelo y confírmalo un día antes.'
         }
       >
         {!props.soloLectura && (
@@ -217,15 +241,17 @@ export function Agenda(props: Props) {
           </p>
         </div>
         <div className="escalonado mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {/* (las tarjetas «al día» se ocultan en el celular) */}
           {tareas.map((t) => {
             const c = t.e.reduce((s, e) => s + n(e), 0);
             const activo = elegido && t.e.includes(elegido.e);
+            const solo = pendientesLista === 1; // en el celular, la única tarea pendiente ocupa todo el ancho
             return (
               <button
                 key={t.t}
                 disabled={!c}
                 onClick={() => elegir(primeroCon(t.e))}
-                className={`group rounded-[22px] p-4 text-left ${c ? (activo ? 'bg-ink text-white' : 'card lift') : 'border border-dashed border-line bg-transparent'}`}
+                className={`group rounded-[22px] p-4 text-left ${c ? (solo ? 'col-span-2 lg:col-span-1 ' : '') : 'hidden sm:block '}${c ? (activo ? 'bg-ink text-white' : 'card lift') : 'border border-dashed border-line bg-transparent'}`}
               >
                 <span className="flex items-center justify-between">
                   <t.icono className={`size-4 ${c ? (activo ? 'text-white/70' : 'text-muted') : 'text-line'}`} />
@@ -237,6 +263,12 @@ export function Agenda(props: Props) {
             );
           })}
         </div>
+        {/* en el celular, lo que ya está al día cabe en una línea */}
+        {alDiaLista.length > 0 && (
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted sm:hidden">
+            <Check className="size-3.5 shrink-0 text-verde" aria-hidden /> Al día: {alDiaLista.join(' · ')}
+          </p>
+        )}
       </section>
 
       {conEstado.length === 0 ? (
@@ -248,12 +280,38 @@ export function Agenda(props: Props) {
                 ? 'El tiempo libre se calcula cuando gerencia define el horario de cada especialista.'
                 : props.agendaSinCitas
                   ? 'Los próximos días aún no tienen citas en la agenda cargada, así que no hay huecos que llenar todavía.'
-                  : 'La agenda de los próximos 14 días está llena o no hay horario de atención esos días.'
+                  : 'La agenda del próximo mes y una semana está llena o no hay horario de atención esos días.'
             }
           />
         </div>
       ) : (
-        <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[300px_1fr]">
+        <>
+        <div className="mt-6 flex items-center justify-between gap-3">
+          <h2 className="kicker">Cupos</h2>
+          <div className="inline-flex rounded-full bg-soft p-1" role="radiogroup" aria-label="Vista de la agenda">
+            {(['calendario', 'lista'] as const).map((v) => (
+              <button
+                key={v}
+                role="radio"
+                aria-checked={vista === v}
+                onClick={() => cambiarVista(v)}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-semibold ${vista === v ? 'bg-white shadow-sm' : 'text-ink/60 hover:text-ink'}`}
+              >
+                {v === 'calendario' ? <CalendarDays className="size-4" aria-hidden /> : <List className="size-4" aria-hidden />}
+                {v === 'calendario' ? 'Calendario' : 'Lista'}
+              </button>
+            ))}
+          </div>
+        </div>
+        {vista === 'calendario' ? (
+          <div className="mt-3 space-y-5">
+            <Calendario items={conEstado} citas={props.citas} hoy={hoy} sel={elegido && clave(elegido.h)} pacientes={pacientes} onElegir={elegir} onAbrir={props.onAbrir} />
+            <div ref={detalle} className="min-w-0 scroll-mt-6">
+              {elegido ? <Detalle key={clave(elegido.h) + elegido.e} h={elegido.h} e={elegido.e} {...props} /> : <Vacio titulo="Elige un cupo" texto="Toca un cupo del calendario para ofrecerlo o asignarlo." />}
+            </div>
+          </div>
+        ) : (
+        <div className="mt-3 grid grid-cols-1 gap-5 lg:grid-cols-[300px_1fr]">
           {/* cupos por día */}
           <aside className="card min-w-0 self-start p-3 lg:sticky lg:top-6">
             {[...dias.entries()].map(([fecha, lista]) => (
@@ -283,8 +341,304 @@ export function Agenda(props: Props) {
             {elegido ? <Detalle key={clave(elegido.h) + elegido.e} h={elegido.h} e={elegido.e} {...props} /> : <Vacio titulo="Elige un cupo" texto="Selecciona un cupo de la lista para ver qué hacer con él." />}
           </div>
         </div>
+        )}
+        </>
       )}
     </div>
+  );
+}
+
+// ---------- calendario: cada semana con lo que ya está agendado y los cupos libres en su hora real ----------
+const ALTO_HORA = 68; // px por hora
+// cada especialista con su tono: cita = relleno suave; cupo libre = borde punteado del mismo color
+const TONO_DR: Record<Profesional, { fondo: string; texto: string; borde: string }> = {
+  'Dra. Sara López': { fondo: '#fdeaf1', texto: '#9d1750', borde: '#ec6a9c' },
+  'Dr. Juan Manuel Olarte': { fondo: '#e6efff', texto: '#1e3f8f', borde: '#5b8def' },
+  'Dr. Juan Esteban': { fondo: '#e3f6ec', texto: '#17603a', borde: '#3fb57a' },
+};
+// estados con los que la cita ya no ocupa el sillón (igual que el cálculo de tiempo libre del backend)
+const LIBERAN = ['Anulado', 'Anulado por pcte. via Whatsapp', 'Cambio de fecha'];
+const DIA_CORTO = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const diaSemana = (f: string) => new Date(`${f}T12:00:00`).getDay();
+const lunesDe = (f: string) => sumarDias(f, -((diaSemana(f) + 6) % 7));
+const aMin = (hora: string) => {
+  const [hh, mm] = hora.split(':').map(Number);
+  return hh * 60 + mm;
+};
+
+// un bloque del calendario: una cita del software o un cupo del panel
+type Bloque =
+  | { tipo: 'cita'; id: string; fecha: string; prof: Profesional; ini: number; fin: number; c: Cita; paciente?: Paciente }
+  | { tipo: 'cupo'; id: string; fecha: string; prof: Profesional; ini: number; fin: number; h: Hueco; e: EstadoEspacio; paciente?: Paciente };
+
+// columnas dentro del carril cuando dos bloques se cruzan (dos sillones a la misma hora)
+function acomodar(bloques: Bloque[]) {
+  const orden = [...bloques].sort((a, b) => a.ini - b.ini || b.fin - a.fin);
+  const pos = new Map<string, { col: number; cols: number }>();
+  let grupo: Bloque[] = [];
+  let finGrupo = -1;
+  const cerrar = () => {
+    const cols: number[] = [];
+    for (const b of grupo) {
+      let c = cols.findIndex((fin) => fin <= b.ini);
+      if (c < 0) c = cols.push(0) - 1;
+      cols[c] = b.fin;
+      pos.set(b.id, { col: c, cols: 0 });
+    }
+    for (const b of grupo) pos.get(b.id)!.cols = cols.length;
+    grupo = [];
+  };
+  for (const b of orden) {
+    if (b.ini >= finGrupo && grupo.length) cerrar();
+    grupo.push(b);
+    finGrupo = Math.max(finGrupo, b.fin);
+  }
+  if (grupo.length) cerrar();
+  return pos;
+}
+
+function Calendario({
+  items,
+  citas,
+  hoy,
+  sel,
+  pacientes,
+  onElegir,
+  onAbrir,
+}: {
+  items: { h: Hueco; e: EstadoEspacio }[];
+  citas: Cita[];
+  hoy: string;
+  sel?: string;
+  pacientes: Paciente[];
+  onElegir: (id: string) => void;
+  onAbrir: (id: string) => void;
+}) {
+  const porId = useMemo(() => new Map(pacientes.map((p) => [p.id, p])), [pacientes]);
+  // todo lo que se puede pintar, una sola vez
+  const bloques = useMemo<Bloque[]>(() => {
+    const deCitas: Bloque[] = citas
+      .filter((c) => c.hora && !LIBERAN.includes(c.estado))
+      .map((c) => {
+        const ini = aMin(c.hora!);
+        return { tipo: 'cita', id: `c${c.id}`, fecha: c.fecha, prof: c.profesional, ini, fin: c.horaFin ? Math.max(aMin(c.horaFin), ini + 15) : ini + 60, c, paciente: porId.get(String(c.paciente)) };
+      });
+    const deCupos: Bloque[] = items.map(({ h, e }) => ({ tipo: 'cupo', id: `h${h.id}`, fecha: h.fecha, prof: h.especialista, ini: aMin(h.hora), fin: aMin(h.hora) + h.minutos, h, e, paciente: h.ocupadoPor ? porId.get(h.ocupadoPor) : undefined }));
+    return [...deCitas, ...deCupos];
+  }, [citas, items, porId]);
+  const sinHora = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of citas) if (!c.hora && !LIBERAN.includes(c.estado)) m.set(c.fecha, (m.get(c.fecha) ?? 0) + 1);
+    return m;
+  }, [citas]);
+
+  // semanas: de la primera a la última con datos (y siempre la de hoy)
+  // todas las semanas con citas cargadas, tengan hora o no (las sin hora se avisan)
+  const fechas = [hoy, ...bloques.map((b) => b.fecha), ...citas.map((c) => c.fecha)].sort();
+  const primera = lunesDe(fechas[0]);
+  const ultima = lunesDe(fechas.at(-1)!);
+  const [semana, setSemana] = useState(() => lunesDe(hoy));
+  const mover = (n: number) => setSemana((s) => {
+    const nueva = sumarDias(s, 7 * n);
+    return nueva < primera ? primera : nueva > ultima ? ultima : nueva;
+  });
+
+  const profes = ESPECIALISTAS.filter((e) => bloques.some((b) => b.prof === e));
+  const [filtro, setFiltro] = useState<Profesional | 'todos'>('todos');
+  const carriles = filtro === 'todos' ? profes : [filtro];
+  const sabado = bloques.some((b) => b.fecha === sumarDias(semana, 5)) || citas.some((c) => c.fecha === sumarDias(semana, 5));
+  const dias = Array.from({ length: sabado ? 6 : 5 }, (_, i) => sumarDias(semana, i));
+  const visibles = bloques.filter((b) => dias.includes(b.fecha) && carriles.includes(b.prof));
+  const cuenta = (f: string) => ({
+    citas: visibles.filter((b) => b.fecha === f && b.tipo === 'cita').length,
+    libres: visibles.filter((b) => b.fecha === f && b.tipo === 'cupo' && (b.e === 'libre' || b.e === 'ofrecido')).length,
+  });
+  // horario visible: 8 a 17, y se estira si alguna cita empieza antes o termina después
+  const ini = Math.min(8, ...visibles.map((b) => Math.floor(b.ini / 60)));
+  const fin = Math.max(17, ...visibles.map((b) => Math.ceil(b.fin / 60)));
+  const horas = Array.from({ length: fin - ini + 1 }, (_, k) => ini + k);
+  const alto = (fin - ini) * ALTO_HORA;
+  const posiciones = new Map<string, { col: number; cols: number }>();
+  for (const d of dias) for (const pr of carriles) acomodar(visibles.filter((b) => b.fecha === d && b.prof === pr)).forEach((v, k) => posiciones.set(k, v));
+
+  // en el celular, un día a la vez
+  const [diaMovil, setDiaMovil] = useState(hoy);
+  const dia = dias.includes(diaMovil) ? diaMovil : dias.includes(hoy) ? hoy : dias[0];
+  const fmt = (f: string, mes = true) => new Date(`${f}T12:00:00`).toLocaleDateString('es-CO', mes ? { day: 'numeric', month: 'short' } : { day: 'numeric' });
+  const vacia = visibles.length === 0;
+  const sinHoraSemana = dias.reduce((n, d) => n + (sinHora.get(d) ?? 0), 0);
+  const limiteCalculo = sumarDias(hoy, DIAS_CUPOS - 1); // hasta dónde calcula el backend el tiempo libre
+
+  return (
+    <section aria-label="Calendario de la agenda" className="card overflow-hidden p-0">
+      {/* barra: semana y especialistas */}
+      <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => mover(-1)} disabled={semana <= primera} aria-label="Semana anterior" className="grid size-9 place-items-center rounded-full border border-line hover:bg-soft disabled:opacity-30">
+            <ChevronLeft className="size-4" />
+          </button>
+          <button onClick={() => mover(1)} disabled={semana >= ultima} aria-label="Semana siguiente" className="grid size-9 place-items-center rounded-full border border-line hover:bg-soft disabled:opacity-30">
+            <ChevronRight className="size-4" />
+          </button>
+          <p className="ml-2 text-[15px] font-semibold">
+            {fmt(dias[0])} – {fmt(dias.at(-1)!)}
+          </p>
+          {semana !== lunesDe(hoy) && (
+            <button onClick={() => setSemana(lunesDe(hoy))} className={`${btnChico} ml-1 bg-soft text-ink/75 hover:text-ink`}>
+              Hoy
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Especialista">
+          {(['todos', ...profes] as const).map((pr) => (
+            <button
+              key={pr}
+              role="radio"
+              aria-checked={filtro === pr}
+              onClick={() => setFiltro(pr)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${filtro === pr ? 'bg-ink text-white' : 'bg-soft text-ink/70 hover:text-ink'}`}
+            >
+              {pr !== 'todos' && <span className="size-2.5 rounded-full" style={{ background: TONO_DR[pr].borde }} aria-hidden />}
+              {pr === 'todos' ? 'Todos' : dr(pr)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* celular: elegir el día */}
+      <div className="no-scrollbar flex gap-1.5 overflow-x-auto border-b border-line px-4 py-2.5 sm:hidden">
+        {dias.map((d) => {
+          const k = cuenta(d);
+          return (
+            <button key={d} onClick={() => setDiaMovil(d)} className={`flex min-w-[58px] shrink-0 flex-col items-center rounded-2xl px-2.5 py-1.5 text-xs ${d === dia ? 'bg-ink text-white' : d === hoy ? 'bg-soft' : 'text-ink/70'}`}>
+              <span className="font-semibold">{DIA_CORTO[diaSemana(d)]}</span>
+              <span className="num text-[15px] font-bold">{fmt(d, false)}</span>
+              <span className={`text-[10px] ${d === dia ? 'text-white/60' : 'text-muted'}`}>{k.libres} libres</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="relative">
+        <div className="grid grid-cols-[46px_1fr] sm:[grid-template-columns:56px_repeat(var(--n),minmax(0,1fr))]" style={{ '--n': dias.length } as React.CSSProperties}>
+          {/* encabezados (escritorio) */}
+          <div className="sticky top-0 z-20 hidden border-b border-line bg-white sm:block" />
+          {dias.map((d) => {
+            const k = cuenta(d);
+            const sh = sinHora.get(d) ?? 0;
+            return (
+              <div key={d} className={`sticky top-0 z-20 hidden border-b border-l border-line px-2 py-2.5 text-center sm:block ${d === hoy ? 'bg-ink text-white' : 'bg-white'}`}>
+                <p className={`text-[11px] font-semibold uppercase tracking-[.12em] ${d === hoy ? 'text-white/70' : 'text-muted'}`}>{d === hoy ? 'Hoy' : DIA_CORTO[diaSemana(d)]}</p>
+                <p className="num text-xl font-bold leading-tight">{fmt(d, false)}</p>
+                <p className={`text-[11px] ${d === hoy ? 'text-white/70' : 'text-muted'}`}>
+                  {k.citas} {k.citas === 1 ? 'cita' : 'citas'} ·{' '}
+                  {d < hoy ? <span>pasado</span> : d > limiteCalculo ? <span title={`El tiempo libre se calcula para los ${DIAS_CUPOS} días siguientes a la fecha de trabajo`}>sin calcular</span> : <b className={d === hoy ? 'text-white' : 'text-ink'}>{k.libres} libres</b>}
+                </p>
+                {sh > 0 && <p className="text-[10px] text-amarillo">{sh} sin hora</p>}
+              </div>
+            );
+          })}
+
+          {/* horas */}
+          <div className="relative bg-white" style={{ height: alto + 16 }}>
+            {horas.map((hh) => (
+              <span key={hh} className="num absolute right-2 -translate-y-1/2 text-[11px] font-medium text-muted" style={{ top: (hh - ini) * ALTO_HORA + 8 }}>
+                {hh}:00
+              </span>
+            ))}
+          </div>
+
+          {/* días */}
+          {dias.map((d) => (
+            <div key={d} className={`relative border-l border-line ${d === dia ? '' : 'hidden sm:block'} ${d === hoy ? 'bg-soft/50' : 'bg-white'}`} style={{ height: alto + 16 }}>
+              <div className="absolute inset-x-0 top-2" style={{ height: alto }}>
+                {horas.slice(0, -1).map((hh) => (
+                  <div key={hh} className="absolute inset-x-0 border-t border-line/60" style={{ top: (hh - ini) * ALTO_HORA }} />
+                ))}
+                {horas.slice(0, -1).map((hh) => (
+                  <div key={`m${hh}`} className="absolute inset-x-0 border-t border-dashed border-line/40" style={{ top: (hh - ini) * ALTO_HORA + ALTO_HORA / 2 }} />
+                ))}
+                <div className="rayado absolute inset-x-0 grid place-items-center text-[10px] font-semibold uppercase tracking-[.16em] text-muted/80" style={{ top: (12 - ini) * ALTO_HORA, height: ALTO_HORA }}>
+                  Almuerzo
+                </div>
+                {visibles
+                  .filter((b) => b.fecha === d)
+                  .map((b) => {
+                    const carril = carriles.indexOf(b.prof);
+                    const anchoCarril = 100 / carriles.length;
+                    const { col, cols } = posiciones.get(b.id) ?? { col: 0, cols: 1 };
+                    const ancho = anchoCarril / cols;
+                    const top = ((b.ini - ini * 60) / 60) * ALTO_HORA + 1;
+                    const altoB = Math.max(20, ((b.fin - b.ini) / 60) * ALTO_HORA - 3);
+                    const tono = TONO_DR[b.prof];
+                    const nombre = b.paciente?.nombre.split(' ')[0];
+                    const estilo: React.CSSProperties = { top, height: altoB, left: `calc(${carril * anchoCarril + col * ancho}% + 3px)`, width: `calc(${ancho}% - 6px)` };
+                    if (b.tipo === 'cita') {
+                      return (
+                        <button
+                          key={b.id}
+                          onClick={() => b.paciente && onAbrir(b.paciente.id)}
+                          title={`${b.c.hora}${b.c.horaFin ? `–${b.c.horaFin}` : ''} · ${b.prof} · ${b.c.estado}${b.paciente ? ` · ${b.paciente.nombre}` : ''}`}
+                          className="absolute overflow-hidden rounded-[10px] px-2 py-1 text-left text-[11px] leading-tight hover:z-10 hover:brightness-95"
+                          style={{ ...estilo, background: tono.fondo, color: tono.texto, boxShadow: `inset 3px 0 0 ${tono.borde}` }}
+                        >
+                          <span className="num block font-bold">{b.c.hora}</span>
+                          {altoB >= 36 && <span className="block truncate font-medium">{nombre ?? 'Cita'}</span>}
+                          {altoB >= 52 && <span className="block truncate opacity-70">{b.c.estado}</span>}
+                        </button>
+                      );
+                    }
+                    const { h, e } = b;
+                    const activo = sel === clave(h);
+                    const libre = e === 'libre';
+                    const ofrecido = e === 'ofrecido';
+                    const lleno = !!b.paciente;
+                    return (
+                      <button
+                        key={b.id}
+                        onClick={() => onElegir(clave(h))}
+                        title={`${h.hora}–${horaFin(h)} · ${h.especialista} · ${INFO[e].t}${b.paciente ? ` · ${b.paciente.nombre}` : ''}`}
+                        className={`absolute overflow-hidden rounded-[10px] px-2 py-1 text-left text-[11px] leading-tight transition-shadow hover:z-10 hover:shadow-md ${activo ? 'z-10 ring-2 ring-ink ring-offset-2' : ''} ${
+                          e === 'ocupado' ? 'rayado text-ink/40 line-through' : lleno ? 'bg-ink text-white' : ofrecido ? 'bg-amarillo/15 text-[#7a5200]' : 'bg-white'
+                        }`}
+                        style={{
+                          ...estilo,
+                          ...(libre && { border: `1.5px dashed ${tono.borde}`, color: tono.texto }),
+                          ...(ofrecido && { border: '1.5px dashed #dc9411' }),
+                        }}
+                      >
+                        <span className="num flex items-center gap-1 font-bold">
+                          {libre && <Plus className="size-3" aria-hidden />}
+                          {h.hora}
+                        </span>
+                        {altoB >= 36 && <span className="block truncate font-medium">{lleno ? nombre : libre ? 'Libre' : INFO[e].t}</span>}
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          ))}
+        </div>
+        {vacia && (
+          <p className="pointer-events-none absolute inset-x-0 top-1/2 mx-auto w-fit -translate-y-1/2 rounded-full bg-white px-4 py-2 text-sm text-muted shadow">
+            {sinHoraSemana ? `Esta semana tiene ${sinHoraSemana} citas, pero el Excel no trae su hora` : 'No hay citas cargadas para esta semana'}
+          </p>
+        )}
+      </div>
+
+      {/* leyenda */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line px-4 py-3 text-[11px] text-muted sm:px-5">
+        <span className="flex items-center gap-1.5">
+          <span className="h-3.5 w-5 rounded" style={{ background: TONO_DR['Dr. Juan Manuel Olarte'].fondo, boxShadow: `inset 3px 0 0 ${TONO_DR['Dr. Juan Manuel Olarte'].borde}` }} /> Cita agendada (color del doctor)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-3.5 w-5 rounded bg-white" style={{ border: `1.5px dashed ${TONO_DR['Dr. Juan Manuel Olarte'].borde}` }} /> Libre: tócalo para ofrecerlo
+        </span>
+        <span className="flex items-center gap-1.5"><span className="h-3.5 w-5 rounded bg-amarillo/15" style={{ border: '1.5px dashed #dc9411' }} /> Esperando respuesta</span>
+        <span className="flex items-center gap-1.5"><span className="h-3.5 w-5 rounded bg-ink" /> Agendado desde el panel</span>
+        <span className="flex items-center gap-1.5"><span className="rayado h-3.5 w-5 rounded" /> Ya ocupado</span>
+      </div>
+    </section>
   );
 }
 
@@ -328,12 +682,12 @@ function Detalle({ h, e, ...p }: Props & { h: Hueco; e: EstadoEspacio }) {
         <div className="aura iris pointer-events-none absolute -right-16 -top-24 size-64 rounded-full opacity-25 blur-3xl" />
         <div className="relative flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-sm text-white/55">{nombreDia(h.fecha, p.hoy)} · {fechaLarga(h.fecha)}</p>
+            <p className="text-sm text-white/55">{diaCompleto(h.fecha, p.hoy)}</p>
             <p className="num mt-1 text-4xl font-bold tracking-tight">
               {h.hora} <span className="text-white/60">–</span> {horaFin(h)}
             </p>
             <p className="mt-1 text-sm text-white/70">
-              {h.especialista} · {h.minutos} min{h.tipoCupo === 'valoracion_45' ? ' · primera valoración' : ''} · {h.origen === 'calculado' ? `Tiempo libre de su horario · agenda cargada ${haceTexto(horasDesdeCarga(p.ultimaCarga))}` : 'Agregado a mano'}
+              {h.especialista} · {h.minutos} min{h.tipoCupo === 'valoracion_45' ? ' · primera valoración' : ''}{h.origen === 'manual' ? ' · agregado a mano' : ''}
             </p>
             <p className="mt-1 text-xs text-white/55">
               {ventana(h, p.hoy) === 'mismo_dia' ? 'Mismo día o mañana: ofrézcalo primero a quien quiere adelantar su cita.' : 'Con más de 24 h: hay tiempo para ofrecerlo y confirmar.'}
@@ -490,11 +844,11 @@ function PorLlenar({ h, ...p }: Props & { h: Hueco }) {
 
 function Candidato({ x, h, hoy, asesora, onAbrir, onOfrecer, onAsignar }: { x: Paciente; h: Hueco; hoy: string; asesora: string; onAbrir: (id: string) => void; onOfrecer: () => void; onAsignar: () => void }) {
   return (
-    <li className="flex flex-wrap items-center gap-3 py-3.5">
+    <li className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2.5 py-3.5 sm:flex sm:gap-3">
       <Iniciales nombre={x.nombre} />
-      <span className="min-w-0 flex-1">
+      <span className="min-w-0 sm:flex-1">
         <span className="flex flex-wrap items-center gap-1.5">
-          <button onClick={() => onAbrir(x.id)} className="mr-1 font-medium hover:underline">
+          <button onClick={() => onAbrir(x.id)} className="mr-1 text-left font-medium leading-snug hover:underline">
             {x.nombre}
           </button>
           <Insignias p={x} hoy={hoy} />
@@ -506,16 +860,19 @@ function Candidato({ x, h, hoy, asesora, onAbrir, onOfrecer, onAsignar }: { x: P
           <b className="text-ink/70">{pesosCorto(x.valor)}</b>
         </span>
       </span>
-      {x.telefono ? (
-        <a href={linkWhatsApp(x.telefono, guionHueco(x, h, { asesora }))} target="_blank" rel="noopener" onClick={onOfrecer} className={`${btnNegro} px-4 py-2`}>
-          <MessageCircle className="size-4" /> Ofrecer
-        </a>
-      ) : (
-        <span className="text-xs text-amarillo">Sin celular</span>
-      )}
-      <button onClick={onAsignar} className={`${btnChico} text-muted hover:bg-soft hover:text-ink`} title="Si ya aceptó por llamada o en persona">
-        Asignar directo
-      </button>
+      {/* en el celular, las acciones van debajo y a todo el ancho */}
+      <span className="col-span-2 flex items-center gap-2 sm:col-span-1 sm:shrink-0">
+        {x.telefono ? (
+          <a href={linkWhatsApp(x.telefono, guionHueco(x, h, { asesora }))} target="_blank" rel="noopener" onClick={onOfrecer} className={`${btnNegro} flex-1 px-4 py-2 sm:flex-none`}>
+            <MessageCircle className="size-4" /> Ofrecer
+          </a>
+        ) : (
+          <span className="flex-1 text-xs text-amarillo sm:flex-none">Sin celular</span>
+        )}
+        <button onClick={onAsignar} className={`${btnChico} shrink-0 bg-soft text-ink/70 hover:text-ink sm:bg-transparent sm:text-muted sm:hover:bg-soft`} title="Si ya aceptó por llamada o en persona">
+          Asignar directo
+        </button>
+      </span>
     </li>
   );
 }
@@ -704,91 +1061,116 @@ function NuevoEspacio({ hoy, onGuardar, onCancelar }: { hoy: string; onGuardar: 
 
 // avisos del cálculo: especialistas sin horario y días que no se pudieron calcular
 function Avisos({ sinHora, sinHorario, onIrHorarios, soloLectura, agendaSinCitas, cubiertaHasta, hoy, onRecargar, ultimaCarga, onIrCargar, huecos, cargaAutomatica, fuenteAgenda, fuenteError }: Props) {
+  const [verSinHora, setVerSinHora] = useState(false);
   const sinDatos = !!cubiertaHasta && cubiertaHasta < hoy; // el Excel no llega a los días que se calculan
   const horas = horasDesdeCarga(ultimaCarga);
   const vieja = horas > AGENDA_VIEJA_H && huecos.some((h) => h.origen === 'calculado');
   if (!sinHora.length && !sinHorario.length && !agendaSinCitas && !vieja && !fuenteError) return null;
+  // qué hacer para ponerla al día, en una frase
+  const comoActualizar = cargaAutomatica
+    ? fuenteAgenda === 'carpeta'
+      ? 'Guarda la exportación de hoy en la carpeta: se carga sola.'
+      : 'Revisa que el software siga actualizando el archivo en línea.'
+    : onIrCargar
+      ? 'Carga el Excel de hoy.'
+      : 'Recepción la actualiza al cargar el Excel del día.';
+  const alertas = (fuenteError && !soloLectura) || vieja || sinHorario.length > 0;
   return (
-    <div className="mt-6 space-y-2">
+    <section aria-label="Estado de la agenda" className="entrar mt-6 overflow-hidden rounded-[22px] border border-line bg-white">
+      {/* lo que pide una acción: una fila corta por alerta, con su botón */}
       {fuenteError && !soloLectura && (
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-rojo/[.07] px-4 py-3 text-sm text-rojo">
-          <AlertTriangle className="size-4 shrink-0" aria-hidden />
-          <span className="flex-1">No se pudo actualizar la agenda en línea: {fuenteError}</span>
+        <Alerta tono="rojo" titulo="No se pudo actualizar la agenda en línea" texto={fuenteError}>
           {onIrCargar && (
-            <button onClick={onIrCargar} className={`${btnChico} bg-white text-ink`}>
+            <button onClick={onIrCargar} className={`${btnChico} bg-ink text-white`}>
               Revisar conexión
             </button>
           )}
-        </p>
+        </Alerta>
       )}
       {vieja && !fuenteError && (
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-amarillo/10 px-4 py-3 text-sm">
-          <FileSpreadsheet className="size-4 shrink-0 text-amarillo" aria-hidden />
-          <span className="flex-1">
-            La agenda se cargó <b>{haceTexto(horas)}</b>: lo que se agendó después no aparece y algún cupo podría estar ya ocupado.
-            {cargaAutomatica
-              ? fuenteAgenda === 'carpeta'
-                ? ' Guarda la exportación de hoy en la carpeta de la agenda: el panel la carga solo.'
-                : ' La fuente en línea no ha cambiado: revisa que el software siga actualizándola.'
-              : onIrCargar
-                ? ' Carga el Excel de hoy para ponerlos todos al día.'
-                : ' Recepción lo actualiza al cargar el Excel del día.'}
-          </span>
+        <Alerta tono="amarillo" titulo={`Agenda cargada ${haceTexto(horas)}`} texto={`Algún cupo podría estar ya ocupado. ${comoActualizar}`}>
           {onIrCargar && (
             <button onClick={onIrCargar} className={`${btnChico} bg-ink text-white`}>
               Cargar Excel de hoy
             </button>
           )}
-        </p>
+        </Alerta>
       )}
       {sinHorario.length > 0 && (
-        <div className="rounded-2xl bg-amarillo/10 px-4 py-3 text-sm">
-          <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <AlertTriangle className="size-4 shrink-0 text-amarillo" aria-hidden />
-            <span className="flex-1">
-              {soloLectura ? 'Gerencia aún no ha definido tu horario' : `Falta el horario de ${sinHorario.join(' y ')}`}: sin horario no se puede calcular el tiempo libre.
-            </span>
-            {onIrHorarios && (
-              <button onClick={onIrHorarios} className={`${btnChico} text-ink/70 hover:bg-white`}>
-                Ajustar en Equipo
-              </button>
-            )}
-          </p>
-          {onIrHorarios && <Sugerido sinHorario={sinHorario} onAplicado={onRecargar} />}
+        <Alerta
+          tono="amarillo"
+          titulo={soloLectura ? 'Falta tu horario' : `Falta el horario de ${sinHorario.join(' y ')}`}
+          texto="Sin horario no se puede calcular su tiempo libre."
+        >
+          {onIrHorarios && (
+            <button onClick={onIrHorarios} className={`${btnChico} bg-soft text-ink/80 hover:text-ink`}>
+              Ajustar en Equipo
+            </button>
+          )}
+        </Alerta>
+      )}
+      {sinHorario.length > 0 && onIrHorarios && (
+        <div className="px-4 pb-3">
+          <Sugerido sinHorario={sinHorario} onAplicado={onRecargar} />
         </div>
       )}
-      {agendaSinCitas > 0 && (
-        <p className="flex items-start gap-3 rounded-2xl bg-soft px-4 py-3 text-sm text-ink/75">
-          <CalendarSearch className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden />
-          <span>
-            {sinDatos ? (
-              <>
-                La agenda cargada llega hasta el <b>{fechaLarga(cubiertaHasta!)}</b>: después no se sabe qué está ocupado, así que no se ofrece como libre.
-                {!soloLectura && ' Para calcular los próximos días, carga una exportación que incluya las citas ya agendadas.'}
-              </>
-            ) : (
-              <>
-                No se muestran {agendaSinCitas} {agendaSinCitas === 1 ? 'día que aún no tiene' : 'días que aún no tienen'} ninguna cita: es normal en fechas lejanas o festivos, y no son huecos por llenar.
-              </>
-            )}
-          </span>
-        </p>
+
+      {/* lo informativo: datos sueltos en una sola línea, el detalle al tocar */}
+      {(agendaSinCitas > 0 || sinHora.length > 0) && (
+        <div className={`flex flex-wrap items-center gap-2 px-4 py-3 text-[13px] ${alertas ? 'border-t border-line bg-paper/60' : ''}`}>
+          <span className="mr-1 text-xs font-medium text-muted">No se ofrecen:</span>
+          {agendaSinCitas > 0 && (
+            <span
+              className="inline-flex cursor-help items-center gap-1.5 rounded-full bg-soft px-3 py-1"
+              title={
+                sinDatos
+                  ? `La agenda cargada llega hasta el ${fechaLarga(cubiertaHasta!)}: después no se sabe qué está ocupado.`
+                  : 'Días sin ninguna cita todavía: es normal en fechas lejanas o festivos, no son huecos por llenar.'
+              }
+            >
+              <CalendarSearch className="size-3.5 text-muted" aria-hidden />
+              {sinDatos ? `Días después del ${fechaLarga(cubiertaHasta!)}` : `${agendaSinCitas} ${agendaSinCitas === 1 ? 'día' : 'días'} sin citas aún`}
+            </span>
+          )}
+          {sinHora.length > 0 && (
+            <button
+              onClick={() => setVerSinHora((v) => !v)}
+              aria-expanded={verSinHora}
+              className="inline-flex items-center gap-1.5 rounded-full bg-soft px-3 py-1 hover:bg-line"
+            >
+              <Clock className="size-3.5 text-muted" aria-hidden />
+              {sinHora.length} {sinHora.length === 1 ? 'día' : 'días'} con citas sin hora
+              <ChevronDown className={`size-3.5 transition-transform ${verSinHora ? 'rotate-180' : ''}`} aria-hidden />
+            </button>
+          )}
+          {verSinHora && (
+            <div className="hoja mt-1 w-full rounded-2xl bg-soft p-3">
+              <ul className="grid gap-x-6 gap-y-0.5 text-ink/75 sm:grid-cols-2">
+                {sinHora.map((d) => (
+                  <li key={d.fecha + d.profesional}>
+                    {fechaLarga(d.fecha)} · {d.profesional}: {d.citas} {d.citas === 1 ? 'cita' : 'citas'}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-muted">Carga el archivo de detalle de la agenda (el que trae la hora de cada cita) para calcularlos.</p>
+            </div>
+          )}
+        </div>
       )}
-      {sinHora.length > 0 && (
-        <details className="rounded-2xl bg-soft px-4 py-3 text-sm">
-          <summary className="cursor-pointer font-medium">
-            {sinHora.length} {sinHora.length === 1 ? 'día no se pudo calcular' : 'días no se pudieron calcular'}: el Excel trae citas sin hora
-          </summary>
-          <ul className="mt-2 space-y-0.5 text-ink/75">
-            {sinHora.map((d) => (
-              <li key={d.fecha + d.profesional}>
-                {fechaLarga(d.fecha)} · {d.profesional}: {d.citas} {d.citas === 1 ? 'cita' : 'citas'} sin hora
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-xs text-muted">Carga el archivo de detalle de la agenda (el que trae la hora de cada cita) para calcular esos días.</p>
-        </details>
-      )}
+    </section>
+  );
+}
+
+function Alerta({ tono, titulo, texto, children }: { tono: 'rojo' | 'amarillo'; titulo: string; texto: string; children?: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2 border-b border-line px-4 py-3 last:border-b-0 sm:flex-row sm:items-center sm:gap-4">
+      <p className="flex min-w-0 flex-1 items-start gap-2.5 text-sm">
+        <span className={`mt-1.5 size-2 shrink-0 rounded-full ${tono === 'rojo' ? 'bg-rojo' : 'bg-amarillo'}`} aria-hidden />
+        <span>
+          <b className="font-semibold">{titulo}</b> <span className="hidden text-muted sm:inline">· {texto}</span>
+        </span>
+      </p>
+      <span className="flex shrink-0 gap-2 pl-[18px] sm:pl-0">{children}</span>
     </div>
   );
 }
@@ -905,7 +1287,7 @@ function Ocupado({ h, ...p }: Props & { h: Hueco }) {
         <div className="relative flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-sm text-muted">
-              {nombreDia(h.fecha, p.hoy)} · {fechaLarga(h.fecha)}
+              {diaCompleto(h.fecha, p.hoy)}
             </p>
             <p className="num relative mt-1 inline-block text-4xl font-bold tracking-tight text-ink/35">
               {h.hora} – {horaFin(h)}

@@ -17,6 +17,7 @@ export interface Cita {
   paciente: number; // # Paciente
   fecha: string; // YYYY-MM-DD
   hora?: string; // HH:MM (solo viene en el archivo de detalle)
+  horaFin?: string; // HH:MM, cuándo termina (mismo archivo)
   estado: string; // texto original del software
   tipo: 'Diagnóstico' | 'Tratamiento';
   profesional: Profesional;

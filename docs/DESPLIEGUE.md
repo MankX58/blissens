@@ -320,3 +320,110 @@ Las tablas nuevas o columnas nuevas del backend se crean solas al arrancar. Si B
 | «El servidor de datos no responde» (502) | `sudo journalctl -u blissens-api -n 50` |
 | Errores de inicio de sesión | `sudo journalctl -u blissens-auth -n 50` |
 | Sin HTTPS | El registro A apunta al servidor y los puertos 80/443 están abiertos: `sudo journalctl -u caddy -n 50` |
+
+---
+
+## Gratis en la nube: Vercel + Render + Neon
+
+```
+https://TU-APP.vercel.app                 ← Vercel: el panel (React compilado)
+   /api/auth/*  → Render «blissens-auth»  (Node: cuentas, Better Auth)
+   /api/*       → Render «blissens-api»   (Python: FastAPI)
+                         └── los dos usan la misma base PostgreSQL en Neon
+```
+
+Vercel reenvía `/api` a Render (`vercel.json`), así todo queda en **un solo dominio** y la cookie de sesión funciona sin CORS.
+Los planes gratis de Render **se duermen tras ~15 min sin uso**: la primera visita tarda 30–60 s. Ábrelo un rato antes de una demo.
+**Usa datos anonimizados**: la base queda en servidores de terceros.
+
+### 0. La cadena de conexión de Neon
+
+En Neon → *Connection details* copia la cadena (con `?sslmode=require`). Se usa de dos formas:
+
+| Dónde | Formato |
+|---|---|
+| Cuentas (Node) y la migración | `postgresql://USUARIO:CLAVE@HOST/neondb?sslmode=require` |
+| Backend (FastAPI) | `postgresql+psycopg://USUARIO:CLAVE@HOST/neondb?sslmode=require` |
+
+### 1. Backend listo para PostgreSQL
+
+Ya están hechos en la copia local del backend (falta confirmarlos y subirlos a `dev`):
+
+- `pyproject.toml`: driver `psycopg[binary]`.
+- `app/modules/auth/sesion_service.py`: las fechas de sesión se leen igual si vienen como texto (SQLite) o como fecha (PostgreSQL).
+- `app/core/base_de_datos.py`: en PostgreSQL el backend **no crea** las tablas de cuentas (`user`, `session`, `account`, `verification`); esas las crea Better Auth en el paso 2. Si arranca sin ellas, se detiene con un mensaje que dice qué correr.
+- `app/modules/equipo/tiempo_libre.py`: cupos para 37 días.
+
+### 2. Crear las tablas de cuentas en Neon (una vez, desde tu computador)
+
+**Antes** de arrancar el backend en Render (sin estas tablas, el backend no arranca y lo avisa en los logs):
+
+```powershell
+$env:DATABASE_URL="postgresql://USUARIO:CLAVE@HOST/neondb?sslmode=require"
+```
+
+```powershell
+npx @better-auth/cli@1.4.21 migrate --config auth/auth.ts -y
+```
+
+Y la cuenta de gerencia (escribe la clave cuando la pida; no queda en el historial):
+
+```powershell
+$env:ADMIN_CLAVE = Read-Host "Clave de gerencia (8+ caracteres)"
+```
+
+```powershell
+npx tsx --env-file-if-exists=.env auth/crear-admin.ts tu-correo@dominio.com "Tu nombre"
+```
+
+Al terminar, cierra esa terminal (o `Remove-Item Env:DATABASE_URL, Env:ADMIN_CLAVE`) para que tu panel local siga usando el SQLite de siempre.
+
+### 3. Subir el panel a GitHub
+
+Confirma y sube los cambios del panel (incluye `vercel.json`, `.vercelignore` y el soporte de PostgreSQL en `auth/auth.ts`).
+
+### 4. Render: dos servicios web (plan Free)
+
+Genera un secreto (cualquier generador de 32+ caracteres, p. ej. `openssl rand -base64 32`) y usa **el mismo** en los dos servicios.
+
+**blissens-api** · *New → Web Service* → repositorio del backend, rama `dev`
+
+| Campo | Valor |
+|---|---|
+| Runtime | Python |
+| Build command | `pip install .` |
+| Start command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+| Variables | `PYTHON_VERSION=3.12.7` · `DATABASE_URL=postgresql+psycopg://…` · `BETTER_AUTH_SECRET=…` · `AUTH_HABILITADA=true` · `CORS_ORIGENES=https://TU-APP.vercel.app` · `WHATSAPP_MODO=simulacion` · `CARGA_AUTOMATICA=false` · `FECHA_CORTE=` (vacío = hoy) |
+
+**blissens-auth** · *New → Web Service* → repositorio del panel
+
+| Campo | Valor |
+|---|---|
+| Runtime | Node |
+| Build command | `npm ci` |
+| Start command | `npx tsx auth/servidor.ts` |
+| Variables | `NODE_VERSION=22` · `DATABASE_URL=postgresql://…` · `BETTER_AUTH_SECRET=…` (el mismo) · `BETTER_AUTH_URL=https://TU-APP.vercel.app` |
+
+Anota las dos direcciones que te da Render (`https://blissens-api-xxxx.onrender.com`, `https://blissens-auth-xxxx.onrender.com`).
+
+### 5. Vercel: el panel
+
+1. En `vercel.json` reemplaza `CAMBIAR-blissens-auth.onrender.com` y `CAMBIAR-blissens-api.onrender.com` por las dos direcciones de Render. Confirma y sube.
+2. Vercel → *Add New → Project* → importa el repositorio del panel. Detecta Vite solo; no necesita variables.
+3. Si la URL final de Vercel no es la que pusiste en `BETTER_AUTH_URL` y `CORS_ORIGENES`, corrígela en Render y redespliega los dos servicios.
+
+### 6. Primer uso
+
+1. Abre `https://TU-APP.vercel.app` y entra con la cuenta de gerencia.
+2. **Cargar agenda** → sube los 4 Excel (anonimizados).
+3. **Equipo** → horario de la clínica, almuerzo y cuentas del equipo.
+
+Google (opcional): en Google Cloud agrega la URI `https://TU-APP.vercel.app/api/auth/callback/google` y pon `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` en **blissens-auth**.
+
+### Si algo falla
+
+- **«El servidor de datos no responde»**: Render estaba dormido; espera un minuto y recarga.
+- **Entra pero todo da 401**: `BETTER_AUTH_SECRET` no es igual en los dos servicios, o `BETTER_AUTH_URL` no es la URL de Vercel.
+- **El backend no arranca y el log dice «Faltan las tablas de cuentas»**: corre el paso 2 y redespliega.
+- **Error 500 en `/api/v1/panel`**: revisa que el backend desplegado incluya los cambios del paso 1.
+- Logs: Render → el servicio → *Logs*.

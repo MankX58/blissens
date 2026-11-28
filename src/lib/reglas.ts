@@ -1,5 +1,7 @@
 import type { Caso, Estado, Grupo, Motivo, MotivoNoContactar, NivelRiesgo, Paciente, Profesional, Resultado, Segmento } from '../types';
 
+// días de agenda libre que calcula el backend desde la fecha de trabajo (DIAS_A_CALCULAR): 1 mes y 1 semana
+export const DIAS_CUPOS = 37;
 export const ESPECIALISTAS: Profesional[] = ['Dra. Sara López', 'Dr. Juan Manuel Olarte', 'Dr. Juan Esteban'];
 // «el Dr. …» / «la Dra. …» para meter el nombre en una frase
 export const conArticulo = (d: Profesional) => (d.startsWith('Dra.') ? 'la ' : 'el ') + d;

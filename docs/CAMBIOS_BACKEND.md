@@ -75,6 +75,9 @@ El frontend ya consume todo esto como **campos opcionales con respaldo**. Mientr
 - **Horario oficial**: lunes a viernes de 8 a 12 y de 13 a 17, almuerzo de 12 a 13. El panel ya lo aplica con un botón (horario + pausa «Almuerzo»); validar que `/equipo/horarios` acepte al Dr. Juan Esteban.
 - **Confirmaciones 24 h**: endpoint de citas futuras de Dentalink que haya que confirmar mañana (el export puede incluir citas futuras).
 
+- **Ventana de cupos: 37 días** (1 mes y 1 semana) en vez de 14. Ya se cambió en la copia local: `DIAS_A_CALCULAR = 37` en `app/modules/equipo/tiempo_libre.py`. Falta subirlo al repositorio. El panel usa la misma cifra en `DIAS_CUPOS` (`src/lib/reglas.ts`): si se cambia en un lado, hay que cambiarla en el otro. Mejor aún, exponerla en `/panel` para que el panel la lea.
+- **Pruebas:** con o sin ese cambio, `pytest` da 60 pasan y 42 fallan en la rama actual. Las fallas ya existían y no tienen que ver con la ventana de días.
+
 ## 6. Campañas (`campanas`)
 
 - **Cola asistida de WhatsApp Web** (la clínica no tiene API): `POST /campanas/{id}/envios/{envio_id}/marcar-enviado-web` marca ese envío exacto como enviado por recepción.

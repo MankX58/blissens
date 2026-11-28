@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { CalendarX, ChevronDown, Download, Lightbulb, TrendingUp, Wallet, type LucideIcon } from 'lucide-react';
+import { CalendarCheck, CalendarX, ChevronDown, Download, Lightbulb, TrendingUp, Wallet, type LucideIcon } from 'lucide-react';
 import type { Caso, Datos, Grupo, Motivo, Paciente } from '../types';
 import { radiografia } from '../lib/excel';
 import { hojas } from '../lib/expediente';
@@ -35,25 +35,34 @@ export function Indicadores({ datos, hoy }: { datos: Datos; hoy: string }) {
     .filter((x) => x.c)
     .sort((a, b) => b.c - a.c);
 
-  // lecturas: qué dicen las cifras, en una frase cada una
-  const lecturas: string[] = [];
+  // hallazgos: cada uno es una cifra que salta a la vista, qué significa y un dato de contexto
+  const hallazgos: Hallazgo[] = [];
   if (r.friccion) {
     const peor = [...r.detalleFriccion].sort((a, b) => b.n - a.n)[0];
-    lecturas.push(`1 de cada ${Math.max(1, Math.round(r.total / r.friccion))} citas no se cumple; lo más frecuente es «${peor.estado}» (${peor.n} citas).`);
+    hallazgos.push({ icono: CalendarX, tono: 'rojo', cifra: `1 de ${Math.max(1, Math.round(r.total / r.friccion))}`, titulo: 'citas no se cumple', detalle: `Lo más común: ${peor.estado.toLowerCase()} (${peor.n})` });
   }
   if (pendientes.length) {
     const vip = pendientes.filter(esVIP);
     const valorVip = vip.reduce((s, p) => s + p.valor, 0);
-    lecturas.push(
+    hallazgos.push(
       vip.length
-        ? `${vip.length} pacientes VIP concentran ${pesosCorto(valorVip)} (${Math.round((valorVip / (porRecuperar || 1)) * 100)} %) del dinero por recuperar: son los primeros a contactar.`
-        : `${pendientes.length} pacientes siguen en seguimiento con ${pesosCorto(porRecuperar)} en tratamientos por recuperar.`,
+        ? { icono: Wallet, tono: 'iris', cifra: `${Math.round((valorVip / (porRecuperar || 1)) * 100)} %`, titulo: 'del dinero está en VIP', detalle: `${vip.length} pacientes · ${pesosCorto(valorVip)}: contactarlos primero` }
+        : { icono: Wallet, tono: 'iris', cifra: pesosCorto(porRecuperar), titulo: 'por recuperar', detalle: `${pendientes.length} pacientes en seguimiento` },
     );
   }
+  // la ocupación total ya está arriba: aquí, qué días la bajan
+  const bajos = oc.porDia.filter((d) => d.hay && d.v < META_OCUPACION).map((d) => d.k.toLowerCase());
+  if (oc.hay && bajos.length)
+    hallazgos.push({
+      icono: CalendarCheck,
+      tono: 'ambar',
+      cifra: `${bajos.length} ${bajos.length === 1 ? 'día' : 'días'}`,
+      titulo: `bajo la meta del ${META_OCUPACION} %`,
+      detalle: `${bajos.join(', ').replace(/, ([^,]*)$/, ' y $1').replace(/^./, (c) => c.toUpperCase())}: ofrecer ahí los cupos`,
+    });
   const mejorPaso = [...porPaso].filter((p) => p.enviados >= 3).sort((a, b) => b.tasa - a.tasa)[0];
-  if (mejorPaso) lecturas.push(`El contacto del día ${mejorPaso.d} es el que más citas logra: ${Math.round(mejorPaso.tasa)} % de los pacientes agenda.`);
-  if (motivos[0]) lecturas.push(`El motivo más común para no seguir es «${MOTIVO_TXT[motivos[0].m].toLowerCase()}» (${motivos[0].c} pacientes).`);
-  if (!contactos.length) lecturas.push('Aún no hay contactos registrados: la recuperación y la efectividad de la regla 3-7-15 se irán midiendo a medida que el equipo trabaje la lista de Hoy.');
+  if (mejorPaso) hallazgos.push({ icono: TrendingUp, tono: 'verde', cifra: `${Math.round(mejorPaso.tasa)} %`, titulo: `agenda en el día ${mejorPaso.d}`, detalle: 'El paso del 3-7-15 que más citas logra' });
+  if (motivos[0]) hallazgos.push({ icono: Lightbulb, tono: 'neutro', cifra: String(motivos[0].c), titulo: `por ${MOTIVO_TXT[motivos[0].m].toLowerCase()}`, detalle: 'El motivo más común para no seguir' });
 
   const sinMotivo = n((p) => p.motivo === 'sin_dato');
   const porCaso = (Object.keys(CASO_TXT) as Caso[])
@@ -143,7 +152,7 @@ export function Indicadores({ datos, hoy }: { datos: Datos; hoy: string }) {
 
       {/* las 4 cifras que importan */}
       <div className="space-y-3">
-        <section aria-label="Cifras principales" className="entrar card grid grid-cols-2 gap-px overflow-hidden bg-line p-0 lg:grid-cols-4">
+        <section aria-label="Cifras principales" className="entrar card grid grid-cols-2 gap-px overflow-hidden bg-line p-0 sm:grid-cols-3 lg:grid-cols-5 [&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1">
           <Clave icono={Wallet} k="Dinero por recuperar" v={porRecuperar} formato={pesosCorto} sub={`${pendientes.length} pacientes en seguimiento`} tono="iris" />
           <Clave
             icono={TrendingUp}
@@ -159,24 +168,54 @@ export function Indicadores({ datos, hoy }: { datos: Datos; hoy: string }) {
             sub={cerrados ? `de ${cerrados} casos cerrados, cuántos volvieron` : 'aún no hay casos cerrados'}
           />
           <Clave icono={CalendarX} k="Citas incumplidas" v={friccion} formato={(x) => `${x.toFixed(1).replace('.', ',')} %`} sub="canceladas, movidas o sin asistir" tono="rojo" />
+          <Clave
+            icono={CalendarCheck}
+            k="Ocupación (14 días)"
+            v={oc.pct}
+            formato={(x) => `${Math.round(x)} %`}
+            sub={oc.hay ? (oc.pct >= META_OCUPACION ? `meta ${META_OCUPACION} % cumplida` : `meta ${META_OCUPACION} % · faltan ${META_OCUPACION - oc.pct} pts`) : 'sin agenda futura cargada'}
+          />
         </section>
 
-        {lecturas.length > 0 && (
-          <section aria-labelledby="t-lect" className="entrar card p-5 sm:p-6">
-            <h2 id="t-lect" className="flex items-center gap-2 text-sm font-semibold">
-              <Lightbulb className="size-4 text-ink/60" aria-hidden /> Lo que dicen los datos
+        {hallazgos.length > 0 && (
+          <section aria-labelledby="t-hall" className="entrar">
+            <h2 id="t-hall" className="kicker mb-3 mt-2 flex items-center gap-2">
+              <Lightbulb className="size-3.5" aria-hidden /> Lo que dicen los datos
             </h2>
-            <ul className="mt-3 space-y-2 text-[15px]">
-              {lecturas.map((l) => (
-                <li key={l} className="flex gap-2.5">
-                  <span className="iris mt-2 size-1.5 shrink-0 rounded-full" aria-hidden />
-                  {l}
+            <ul className={`grid grid-cols-2 gap-3 [&>*:last-child:nth-child(odd)]:col-span-2 lg:[&>*:last-child:nth-child(odd)]:col-span-1 ${COLUMNAS[Math.min(hallazgos.length, 5)]}`}>
+              {hallazgos.map((h) => (
+                <li key={h.titulo} className="card flex flex-col rounded-[22px] p-4 sm:p-5">
+                  <span className={`grid size-8 place-items-center rounded-full ${TONO_HALLAZGO[h.tono]}`}>
+                    <h.icono className="size-4" aria-hidden />
+                  </span>
+                  <p className="num mt-3 text-2xl font-bold leading-none tracking-tight sm:text-[28px]">{h.cifra}</p>
+                  <p className="mt-1 text-sm font-semibold leading-snug">{h.titulo}</p>
+                  <p className="mt-auto pt-2 text-xs leading-snug text-muted">{h.detalle}</p>
                 </li>
               ))}
             </ul>
+            {!contactos.length && (
+              <p className="mt-3 text-xs text-muted">
+                La recuperación y la efectividad del 3-7-15 aparecerán aquí en cuanto el equipo registre contactos desde «Hoy».
+              </p>
+            )}
           </section>
         )}
       </div>
+
+      <nav aria-label="Secciones" className="no-scrollbar -mx-4 flex gap-1.5 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0 lg:sticky lg:top-3 lg:z-20 lg:w-fit lg:rounded-full lg:border lg:border-line lg:bg-paper/90 lg:p-1 lg:backdrop-blur">
+        {[
+          ['agenda', 'Agenda'],
+          ['pacientes', 'Pacientes'],
+          ['funciona', 'Qué funciona'],
+          ['ritmo', 'Equipo'],
+          ['tablas', 'Tablas'],
+        ].map(([id, t]) => (
+          <a key={id} href={`#t-${id}`} onClick={(e) => (e.preventDefault(), document.getElementById(`t-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))} className="shrink-0 rounded-full bg-white px-3.5 py-1.5 text-[13px] font-semibold text-ink/75 ring-1 ring-line hover:text-ink lg:ring-0 lg:hover:bg-soft">
+            {t}
+          </a>
+        ))}
+      </nav>
 
       <Seccion id="agenda" titulo="¿Cómo está la agenda?" sub="Qué pasó con las citas del archivo cargado.">
         {r.total ? <Agenda r={r} oc={oc} /> : <Pista>Carga la agenda para ver cuántas citas se cumplen.</Pista>}
@@ -198,12 +237,16 @@ export function Indicadores({ datos, hoy }: { datos: Datos; hoy: string }) {
       </Seccion>
 
       <Seccion id="funciona" titulo="¿Qué está funcionando?" sub="Para decidir dónde poner el esfuerzo del equipo.">
-        {funciona.length > 0 && <div className="grid gap-4 lg:grid-cols-2">{funciona.map((f) => f.tarjeta)}</div>}
-        {pendientesDeDatos.length > 0 && (
-          <Pista>
-            {funciona.length ? 'También se medirá' : 'Se medirá'} {lista(pendientesDeDatos)} en cuanto el equipo registre contactos, libere cupos o lance campañas.
-          </Pista>
-        )}
+        <div className="grid gap-4 lg:grid-cols-2">
+          {funciona.map((f) => f.tarjeta)}
+          {pendientesDeDatos.length > 0 && (
+            <div className="flex items-center rounded-[22px] border border-dashed border-line p-5 text-sm leading-relaxed text-muted sm:p-6">
+              <p>
+                {funciona.length ? 'También se medirá' : 'Se medirá'} {lista(pendientesDeDatos)} en cuanto el equipo registre contactos, libere cupos o lance campañas.
+              </p>
+            </div>
+          )}
+        </div>
       </Seccion>
 
       <Seccion id="ritmo" titulo="¿Qué tan activo está el equipo?" sub="Contactos registrados en las últimas dos semanas.">
@@ -217,10 +260,27 @@ export function Indicadores({ datos, hoy }: { datos: Datos; hoy: string }) {
 
 // ---------- piezas ----------
 
+interface Hallazgo {
+  icono: LucideIcon;
+  tono: 'rojo' | 'iris' | 'verde' | 'ambar' | 'neutro';
+  cifra: string;
+  titulo: string;
+  detalle: string;
+}
+const TONO_HALLAZGO: Record<Hallazgo['tono'], string> = {
+  rojo: 'bg-rojo/10 text-rojo',
+  iris: 'iris text-ink',
+  verde: 'bg-verde/12 text-verde',
+  ambar: 'bg-amarillo/15 text-[#8a5d00]',
+  neutro: 'bg-soft text-ink/70',
+};
+// clases completas (Tailwind no ve clases armadas con variables)
+const COLUMNAS: Record<number, string> = { 1: 'lg:grid-cols-2', 2: 'lg:grid-cols-2', 3: 'lg:grid-cols-3', 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5' };
+
 function Seccion({ id, titulo, sub, children }: { id: string; titulo: string; sub: string; children: ReactNode }) {
   return (
     <section aria-labelledby={`t-${id}`}>
-      <h2 id={`t-${id}`} className="text-xl font-bold tracking-tight">
+      <h2 id={`t-${id}`} className="scroll-mt-20 text-xl font-bold tracking-tight">
         {titulo}
       </h2>
       <p className="mb-4 text-sm text-muted">{sub}</p>
@@ -328,7 +388,7 @@ function Agenda({ r, oc }: { r: ReturnType<typeof radiografia>; oc: ReturnType<t
         <Barras color="bg-rojo" filas={[...r.detalleFriccion].sort((a, b) => b.n - a.n).map((d) => ({ k: ETIQUETA_ESTADO[d.estado] ?? d.estado, v: d.n, extra: pct(d.n, r.total) }))} />
         {r.whatsappFallida > 0 && (
           <p className="mt-4 text-xs text-muted">
-            <b className="text-ink">{r.whatsappFallida}</b> recordatorios de WhatsApp fallaron (número malo o inactivo): esos pacientes salen marcados para revisar el número.
+            <b className="text-ink">{r.whatsappFallida}</b> {r.whatsappFallida === 1 ? 'recordatorio de WhatsApp falló' : 'recordatorios de WhatsApp fallaron'} (número malo o inactivo): esos pacientes salen marcados para revisar el número.
           </p>
         )}
       </Tarjeta>
@@ -471,7 +531,7 @@ function TablasDatos({ tablas, hoy }: { tablas: ReturnType<typeof hojas>; hoy: s
   const [tabla, setTabla] = useState(tablas[0].id);
   const actual = tablas.find((t) => t.id === tabla)!;
   return (
-    <details className="group card overflow-hidden">
+    <details id="t-tablas" className="group card scroll-mt-20 overflow-hidden">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-5 sm:p-6 [&::-webkit-details-marker]:hidden">
         <span>
           <span className="block font-semibold">Ver los datos en tablas</span>

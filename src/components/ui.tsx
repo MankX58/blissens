@@ -168,7 +168,7 @@ export function Encabezado({ titulo, descripcion, children }: { titulo: ReactNod
     <header className="entrar flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
       <div>
         <h1 className="text-3xl font-bold tracking-tight sm:text-[44px] sm:leading-[1.05]">{titulo}</h1>
-        {descripcion && <p className="mt-2 max-w-2xl text-[15px] text-muted">{descripcion}</p>}
+        {descripcion && <p className="mt-2 max-w-2xl text-sm text-muted sm:text-[15px]">{descripcion}</p>}
       </div>
       {children && <div className="flex flex-wrap gap-2">{children}</div>}
     </header>

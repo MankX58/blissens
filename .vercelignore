@@ -1,0 +1,10 @@
+# Nunca subir datos de pacientes ni secretos a Vercel (ni siquiera desplegando con la CLI desde este equipo)
+public/datos/
+datos/
+backend/
+*.db
+*.db-*
+*.xlsx
+.env
+.env.*
+!.env.example

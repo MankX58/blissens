@@ -290,7 +290,7 @@ function Lista({ pacientes, hoy, onAbrir, onCrear, soloLectura }: { pacientes: P
         ))}
       </div>
 
-      <p className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+      <p className="mt-5 hidden flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted sm:flex">
         <span className="font-medium text-ink/70">Mensajes 3-7-15:</span>
         {[
           ['iris', 'agendó cita'],
@@ -305,6 +305,9 @@ function Lista({ pacientes, hoy, onAbrir, onCrear, soloLectura }: { pacientes: P
         <span className="ml-auto">
           {visibles.length.toLocaleString('es-CO')} {visibles.length === 1 ? 'paciente' : 'pacientes'}
         </span>
+      </p>
+      <p className="mt-4 text-xs text-muted sm:hidden">
+        {visibles.length.toLocaleString('es-CO')} {visibles.length === 1 ? 'paciente' : 'pacientes'}
       </p>
       <div className="card mt-2 overflow-hidden">
         <div className="hidden grid-cols-[2fr_1.4fr_1fr_1.1fr_.7fr_1rem] gap-4 border-b border-line px-5 py-3 xl:grid">

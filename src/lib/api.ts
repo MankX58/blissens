@@ -51,6 +51,7 @@ interface ApiCita {
   profesional: string;
   estado_actual: string;
   hora_inicio: string | null;
+  hora_fin?: string | null;
   comentario_cita: string | null;
   tipo_paciente?: string | null;
 }
@@ -239,6 +240,7 @@ const citasDe = (p: ApiPaciente): Cita[] =>
     paciente: p.numero_paciente,
     fecha: c.fecha_cita,
     hora: c.hora_inicio ?? undefined,
+    horaFin: c.hora_fin ?? undefined,
     estado: c.estado_actual,
     tipo: c.tipo_atencion,
     profesional: c.profesional as Profesional,

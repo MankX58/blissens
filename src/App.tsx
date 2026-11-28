@@ -412,6 +412,7 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
           {pantalla === 'cargar' && puedeVer(usuario.rol, 'cargar') && <Cargar onSubir={subirExcel} gerencia={usuario.rol === 'direccion'} onFuente={recargar} />}
           {pantalla === 'agenda' && puedeVer(usuario.rol, 'agenda') && (
             <Agenda
+              citas={esp ? datos.citas.filter((c) => c.profesional === usuario.profesional) : datos.citas}
               pacientes={vista.pacientes}
               huecos={vista.huecos}
               hoy={hoy}
