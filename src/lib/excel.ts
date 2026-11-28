@@ -318,7 +318,9 @@ export async function leerArchivos(files: { nombre: string; buffer: ArrayBuffer 
 }
 
 // Radiografía de la agenda (RF-07): todo se calcula sobre las citas cargadas
-export function radiografia(citas: Cita[]) {
+const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+// hoy: fecha de trabajo; una cita «Confirmado» anterior a hoy no se atendió: queda por depurar en el software
+export function radiografia(citas: Cita[], hoy = '9999-12-31') {
   const cuenta = (f: (c: Cita) => boolean) => citas.filter(f).length;
   const porEstado = new Map<string, number>();
   for (const c of citas) porEstado.set(c.estado, (porEstado.get(c.estado) ?? 0) + 1);
@@ -326,12 +328,22 @@ export function radiografia(citas: Cita[]) {
   for (const c of citas) meses.set(c.fecha.slice(0, 7), (meses.get(c.fecha.slice(0, 7)) ?? 0) + 1);
   const friccion = cuenta((c) => FRICCION_KPI.includes(c.estado));
   const atendidas = cuenta((c) => c.estado === 'Atendido');
+  const porDepurar = cuenta((c) => c.estado === 'Confirmado' && c.fecha < hoy);
+  const dia = (f: string) => {
+    const [y, m, d] = f.split('-').map(Number);
+    return new Date(y, m - 1, d).getDay();
+  };
   return {
     total: citas.length,
     pacientes: new Set(citas.map((c) => c.paciente)).size,
     friccion,
     atendidas,
-    otras: citas.length - friccion - atendidas,
+    otras: citas.length - friccion - atendidas - porDepurar,
+    porDepurar,
+    whatsappFallida: porEstado.get('Notif. WhatsApp fallida') ?? 0,
+    // fricción por día de la semana (lunes y miércoles son los más difíciles de llenar)
+    friccionPorDia: [1, 2, 3, 4, 5].map((d) => ({ k: DIAS[d], v: cuenta((c) => FRICCION_KPI.includes(c.estado) && dia(c.fecha) === d), total: cuenta((c) => dia(c.fecha) === d) })),
+    porProfesional: [...new Set(citas.map((c) => c.profesional))].map((k) => ({ k, v: cuenta((c) => c.profesional === k) })).sort((a, b) => b.v - a.v),
     detalleFriccion: FRICCION_KPI.map((e) => ({ estado: e, n: porEstado.get(e) ?? 0 })),
     meses: [...meses.entries()].sort(([a], [b]) => (a < b ? -1 : 1)),
     sara: cuenta((c) => c.profesional === 'Dra. Sara López'),

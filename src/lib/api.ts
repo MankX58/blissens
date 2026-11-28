@@ -1,6 +1,6 @@
 // Cliente del backend FastAPI (../blissens-backend). Vite pasa /api a :8000 con la cookie de sesión de Better Auth.
 // El backend es la fuente de verdad: aquí solo se traducen sus respuestas (snake_case) al modelo del panel (src/types.ts).
-import type { Campana, Caso, Cita, Contacto, Datos, Equipo, FuenteAgenda, Estado, EstadoEnvio, Franja, Grupo, Hueco, Motivo, NivelRiesgo, Paciente, Pausa, Profesional, Resultado, Segmento } from '../types';
+import type { MotivoNoContactar, Campana, Caso, Cita, Contacto, Datos, Equipo, FuenteAgenda, Estado, EstadoEnvio, Franja, Grupo, Hueco, Motivo, NivelRiesgo, Paciente, Pausa, Profesional, Resultado, Segmento } from '../types';
 
 const BASE = '/api/v1';
 
@@ -52,6 +52,7 @@ interface ApiCita {
   estado_actual: string;
   hora_inicio: string | null;
   comentario_cita: string | null;
+  tipo_paciente?: string | null;
 }
 export interface ApiPaciente {
   numero_paciente: number;
@@ -87,6 +88,22 @@ export interface ApiPaciente {
   contactos?: ApiContacto[];
   notas?: { fecha: string; texto: string }[];
   ciclos?: { caso: string; fecha_evento: string; cierre: string; motivo: string; contactos: ApiContacto[] }[];
+  // contrato nuevo (opcionales hasta que el backend los publique)
+  tipo_paciente?: string | null;
+  es_perdido_60d?: boolean;
+  cambios_fecha_historicos?: number;
+  marca_3_cambios_fecha?: boolean;
+  saldo_pendiente_cop?: number | null;
+  no_contactar?: boolean;
+  motivo_no_contactar?: MotivoNoContactar | null;
+  quiere_adelantar_cita?: boolean;
+  consentimiento_whatsapp?: boolean | null;
+  en_chat_whatsapp?: boolean;
+  pendiente_depuracion?: boolean;
+  idioma_preferido?: 'es' | 'en' | null;
+  paso_abono_actual?: 3 | 7 | null;
+  toca_abono_hoy?: boolean;
+  agendado_por?: string | null;
 }
 interface ApiHueco {
   id: number;
@@ -102,6 +119,8 @@ interface ApiHueco {
   asistencia: 'asistio' | 'no_asistio' | null;
   confirmado_el: string | null;
   ofertas: { numero_paciente: number; fecha: string; rechazo: boolean }[];
+  tipo_cupo?: 'valoracion_45' | 'control' | null;
+  ventana_anticipacion?: 'mas_24h' | 'mismo_dia' | null;
 }
 interface ApiCampana {
   id: number;
@@ -196,6 +215,21 @@ export function adaptarPaciente(p: ApiPaciente): Paciente {
     ciclos: (p.ciclos ?? []).map((c) => ({ caso: c.caso as Caso, fechaEvento: c.fecha_evento, cierre: c.cierre as Estado, motivo: c.motivo as Motivo, contactos: c.contactos.map(contacto) })),
     origen: p.origen ?? 'excel',
     creadoEl: p.creado_el ?? p.ultima_fecha_cita,
+    tipoPaciente: p.tipo_paciente ?? ultima?.tipo_paciente ?? undefined,
+    perdido60: p.es_perdido_60d,
+    cambiosFecha: p.cambios_fecha_historicos,
+    tresCambiosFecha: p.marca_3_cambios_fecha,
+    saldoPendiente: p.saldo_pendiente_cop ?? undefined,
+    noContactar: p.no_contactar,
+    motivoNoContactar: p.motivo_no_contactar ?? undefined,
+    quiereAdelantarCita: p.quiere_adelantar_cita,
+    consentimientoWhatsapp: p.consentimiento_whatsapp,
+    enChatWhatsapp: p.en_chat_whatsapp,
+    pendienteDepuracion: p.pendiente_depuracion,
+    idioma: p.idioma_preferido ?? undefined,
+    pasoAbono: p.paso_abono_actual,
+    tocaAbonoHoy: p.toca_abono_hoy,
+    agendadoPor: p.agendado_por ?? undefined,
   };
 }
 
@@ -226,6 +260,8 @@ export const adaptarHueco = (h: ApiHueco): Hueco => ({
   confirmadoEl: h.confirmado_el ?? undefined,
   asistencia: h.asistencia ?? undefined,
   ofertas: h.ofertas.map((o) => ({ pacienteId: String(o.numero_paciente), fecha: o.fecha, rechazo: o.rechazo || undefined })),
+  tipoCupo: h.tipo_cupo ?? undefined,
+  ventanaAnticipacion: h.ventana_anticipacion ?? undefined,
 });
 
 export const adaptarCampana = (c: ApiCampana): Campana => ({
@@ -305,8 +341,19 @@ export interface NuevaCampana {
   envios: { pacienteId: string; texto: string }[];
 }
 
+// Endpoints del contrato nuevo que el backend aún puede no tener: si responde 404/405/422, se usa el camino actual.
+async function conRespaldo<T>(nuevo: () => Promise<T>, actual: () => Promise<T>): Promise<T> {
+  try {
+    return await nuevo();
+  } catch (e) {
+    if (e instanceof ErrorApi && [404, 405, 422].includes(e.status)) return actual();
+    throw e;
+  }
+}
+
 export const api = {
-  panel: () => pedir<ApiPanel>('/panel').then(adaptarPanel),
+  // anonimo: el backend enmascara nombres y contactos (modo sustentación); el panel además enmascara por su cuenta
+  panel: (anonimo = false) => pedir<ApiPanel>(`/panel${anonimo ? '?anonimo=true' : ''}`).then(adaptarPanel),
   configurar: (cambios: { asesora?: string; fecha_corte?: string }) => patch('/configuracion', cambios),
 
   // equipo: horarios de especialistas, descansos de la clínica y vacaciones (solo gerencia escribe)
@@ -327,8 +374,21 @@ export const api = {
 
   // pacientes y 3-7-15
   expediente: (id: string) => pedir<ApiPaciente>(`/pacientes/${n(id)}`).then(adaptarPaciente),
+  // «sin_whatsapp» es nuevo: si el backend aún no lo acepta, va como «sin_respuesta» con la nota que lo explica
   contactar: (id: string, c: { resultado: Resultado; mensaje: string; motivo: Motivo; nota?: string }) =>
-    post<ApiPaciente>(`/pacientes/${n(id)}/contactos`, c).then(adaptarPaciente),
+    conRespaldo(
+      () => post<ApiPaciente>(`/pacientes/${n(id)}/contactos`, c),
+      () => post<ApiPaciente>(`/pacientes/${n(id)}/contactos`, { ...c, resultado: c.resultado === 'sin_whatsapp' ? 'sin_respuesta' : c.resultado })
+    ).then(adaptarPaciente),
+  // NO contactar tipificado; sin el endpoint nuevo: se descarta y el motivo queda en una nota
+  noContactar: (id: string, motivo: MotivoNoContactar, texto: string) =>
+    conRespaldo(
+      () => post<ApiPaciente>(`/pacientes/${n(id)}/no-contactar`, { motivo }),
+      async () => {
+        await post(`/pacientes/${n(id)}/notas`, { texto });
+        return post<ApiPaciente>(`/pacientes/${n(id)}/descartar`, {});
+      }
+    ).then(adaptarPaciente),
   actualizar: (id: string, c: { celular?: string; profesional_principal?: string }) => patch<ApiPaciente>(`/pacientes/${n(id)}`, c).then(adaptarPaciente),
   nota: (id: string, texto: string) => post(`/pacientes/${n(id)}/notas`, { texto }),
   reactivar: (id: string) => post<ApiPaciente>(`/pacientes/${n(id)}/reactivar`, {}).then(adaptarPaciente),
@@ -348,7 +408,7 @@ export const api = {
     }).then(adaptarPaciente),
 
   // agenda libre
-  crearCupo: (h: Hueco) => post<ApiHueco>('/agenda/huecos', { fecha: h.fecha, hora: h.hora, minutos: h.minutos, profesional: h.especialista }).then(adaptarHueco),
+  crearCupo: (h: Hueco) => post<ApiHueco>('/agenda/huecos', { fecha: h.fecha, hora: h.hora, minutos: h.minutos, profesional: h.especialista, tipo_cupo: h.tipoCupo }).then(adaptarHueco),
   borrarCupo: (id: string) => pedir<void>(`/agenda/huecos/${n(id)}`, { method: 'DELETE' }),
   ofrecer: (cupo: string, paciente: string) => post<{ hueco: ApiHueco }>(`/agenda/huecos/${n(cupo)}/ofrecer`, { numero_paciente: n(paciente) }).then((r) => adaptarHueco(r.hueco)),
   rechazar: (cupo: string, paciente: string) => post<ApiHueco>(`/agenda/huecos/${n(cupo)}/rechazar`, { numero_paciente: n(paciente) }).then(adaptarHueco),
@@ -373,6 +433,12 @@ export const api = {
       textos: Object.fromEntries(c.envios.map((e) => [n(e.pacienteId), e.texto])),
     }).then(adaptarCampana),
   enviarSiguiente: (id: string) => post<ApiCampana>(`/campanas/${n(id)}/ejecutar-lote`, { tamano_lote: 1 }).then(adaptarCampana),
+  // cola asistida de WhatsApp Web: recepción lo envió a mano; sin el endpoint nuevo, se registra con el envío simulado
+  marcarEnviadoWeb: (id: string, envio: string) =>
+    conRespaldo(
+      () => post<ApiCampana>(`/campanas/${n(id)}/envios/${n(envio)}/marcar-enviado-web`, {}),
+      () => post<ApiCampana>(`/campanas/${n(id)}/ejecutar-lote`, { tamano_lote: 1 })
+    ).then(adaptarCampana),
   accionCampana: (id: string, accion: AccionCampana) => patch<ApiCampana>(`/campanas/${n(id)}/estado`, { accion }).then(adaptarCampana),
   respuesta: (id: string, envio: string, respondio: boolean) => patch<ApiCampana>(`/campanas/${n(id)}/envios/${n(envio)}`, { respondio }).then(adaptarCampana),
   borrarCampana: (id: string) => pedir<void>(`/campanas/${n(id)}`, { method: 'DELETE' }),

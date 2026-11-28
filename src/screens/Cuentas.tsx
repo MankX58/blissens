@@ -711,6 +711,20 @@ function Horario({ c, franjas, onGuardado }: { c: Cuenta; franjas: Franja[]; onG
     }
   };
 
+  // horario oficial de la clínica: lunes a viernes 8:00-17:00 con almuerzo 12:00-13:00 (el almuerzo queda como descanso)
+  const horarioOficial = async () => {
+    setDias(DIAS.map((_, i) => ({ activo: i < 5, inicio: '08:00', fin: '17:00' })));
+    try {
+      const { pausas } = await api.equipo();
+      if (!pausas.some((x) => x.inicio === '12:00' && x.fin === '13:00')) {
+        await api.guardarPausas([...pausas, { nombre: 'Almuerzo', inicio: '12:00', fin: '13:00' }]);
+        onGuardado('Almuerzo 12:00-13:00 agregado a los descansos. Revise y guarde el horario.');
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   const guardar = async (e: FormEvent) => {
     e.preventDefault();
     const malo = dias.findIndex((d) => d.activo && d.inicio >= d.fin);
@@ -732,8 +746,8 @@ function Horario({ c, franjas, onGuardado }: { c: Cuenta; franjas: Franja[]; onG
         <button type="button" onClick={sugerido} className={`${btnChico} bg-ink text-white`}>
           Según las citas cargadas
         </button>
-        <button type="button" onClick={() => setDias(DIAS.map((_, i) => ({ activo: i < 5, inicio: '08:00', fin: '17:00' })))} className={`${btnChico} bg-soft text-ink/75 hover:text-ink`}>
-          Lunes a viernes, 8:00 a 17:00
+        <button type="button" onClick={horarioOficial} className={`${btnChico} bg-soft text-ink/75 hover:text-ink`}>
+          Horario de la clínica: L-V 8-12 y 13-17
         </button>
       </div>
       <ul className="divide-y divide-line">

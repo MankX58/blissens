@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Cloud, CloudOff, FileSpreadsheet, Link2, RefreshCw, Upload, X } from 'lucide-react';
-import { TIPO_TXT, leerHoja, procesar, tipoDe, type Carga, type TipoArchivo } from '../lib/excel';
-import { GRUPO_TXT, pesosCorto } from '../lib/reglas';
+import { TIPO_TXT, leerHoja, procesar, radiografia, tipoDe, type Carga, type TipoArchivo } from '../lib/excel';
+import { GRUPO_TXT, normalizarCelular, pesosCorto } from '../lib/reglas';
 import type { FuenteAgenda, Grupo } from '../types';
 import { api } from '../lib/api';
 import { haceTexto, horasDesdeCarga } from './Agenda';
@@ -11,7 +11,7 @@ type Entrada = { nombre: string; filas: Record<string, unknown>[]; tipo: TipoArc
 const ESPERADOS: TipoArchivo[] = ['historial', 'detalle', 'arancel', 'guiones'];
 const AYUDA: Record<TipoArchivo, string> = {
   historial: 'Todas las citas con su estado (Atendido, Anulado, Cambio de fecha, No asiste…). Base de la segmentación.',
-  detalle: 'Citas con celular, correo, hora, sillón y comentario. Se cruza por # Cita y # Paciente.',
+  detalle: 'Citas con celular, correo, hora, sillón, comentario y «Tipo Paciente» (Deportista o Internacional los marca como VIP). Se cruza por # Cita y # Paciente.',
   arancel: 'Precios de las acciones habilitadas, para estimar el dinero en pausa de cada paciente.',
   guiones: 'Las 24 plantillas oficiales de WhatsApp (ya integradas en el panel).',
   desconocido: '',
@@ -171,6 +171,8 @@ export function Cargar({ onSubir, gerencia = false, onFuente }: { onSubir: (a: A
             <Dato k="Cruzados con datos de contacto" v={res.conContacto} />
             <Dato k="Sin celular (alerta)" v={res.pacientes.filter((p) => !p.telefono).length} />
             <Dato k="Riesgo alto (3+ seguidas sin asistir)" v={res.pacientes.filter((p) => p.fallosSeguidos >= 3).length} />
+            <Dato k="«Confirmado» pasadas: no vinieron, por depurar" v={radiografia(res.citas, res.fechaCorte).porDepurar} />
+            <Dato k="Números con WhatsApp fallido o inválido" v={new Set(res.citas.filter((c) => c.estado === 'Notif. WhatsApp fallida').map((c) => c.paciente)).size + res.pacientes.filter((p) => p.telefono && !normalizarCelular(p.telefono)).length} />
             <div className="card rounded-[22px] p-5">
               <dd className="text-[26px] font-bold leading-none tracking-tight">
                 <Cifra valor={res.pacientes.filter((p) => p.estado === 'pendiente').reduce((s, p) => s + p.valor, 0)} formato={pesosCorto} />

@@ -1,6 +1,8 @@
-import type { Caso, Estado, Grupo, Motivo, NivelRiesgo, Paciente, Profesional, Resultado, Segmento } from '../types';
+import type { Caso, Estado, Grupo, Motivo, MotivoNoContactar, NivelRiesgo, Paciente, Profesional, Resultado, Segmento } from '../types';
 
-export const ESPECIALISTAS: Profesional[] = ['Dra. Sara López', 'Dr. Juan Manuel Olarte'];
+export const ESPECIALISTAS: Profesional[] = ['Dra. Sara López', 'Dr. Juan Manuel Olarte', 'Dr. Juan Esteban'];
+// «el Dr. …» / «la Dra. …» para meter el nombre en una frase
+export const conArticulo = (d: Profesional) => (d.startsWith('Dra.') ? 'la ' : 'el ') + d;
 
 export const PASOS = [3, 7, 15] as const;
 export type Paso = (typeof PASOS)[number];
@@ -31,7 +33,7 @@ export const fechaCorta = (f: string) => {
 export const etapaPorDias = (dias: number): Paso => (dias <= 3 ? 3 : dias <= 14 ? 7 : 15);
 
 export function pasoActual(p: Paciente, hoy: string): Paso | null {
-  if (p.estado !== 'pendiente') return null;
+  if (p.estado !== 'pendiente' || noContactar(p)) return null;
   const ultimo = Math.max(0, ...p.contactos.map((c) => c.paso));
   const etapa = etapaPorDias(diasEntre(p.fechaEvento, hoy));
   return PASOS.find((s) => s > ultimo && s >= etapa) ?? PASOS.find((s) => s > ultimo) ?? null;
@@ -60,11 +62,13 @@ export const esVIP = (p: Paciente) => p.etiquetas.includes('VIP');
 // Alto: 3+ seguidas sin asistir · Medio: 1-2 seguidas, o reprograma mucho (3+ en total) aunque sigue viniendo · Bajo: el resto
 export const nivelRiesgo = (seguidos: number, total: number): NivelRiesgo => (seguidos >= 3 ? 'Alto' : seguidos >= 1 || total >= 3 ? 'Medio' : 'Bajo');
 
-// Rojo = urgente (día 3, VIP o riesgo alto) · Amarillo = seguimiento (día 7) · Verde = rescate (día 15 o limpieza preventiva)
+// Rojo = urgente (canceló o no asistió y no ha reagendado, VIP o riesgo alto) · Amarillo = seguimiento (día 7) · Verde = rescate (día 15 o limpieza preventiva)
+// La clínica pidió que quien canceló o faltó siga en rojo mientras no reagende, sin importar el día.
+const sinReagendar = (p: Paciente) => p.caso === 'cancelo' || p.caso === 'no_asistio';
 export function semaforo(p: Paciente, hoy: string): Semaforo | null {
   const paso = pasoActual(p, hoy);
   if (!paso) return null;
-  if (paso === 3 || esVIP(p) || riesgoAlto(p)) return 'rojo';
+  if (paso === 3 || sinReagendar(p) || esVIP(p) || riesgoAlto(p)) return 'rojo';
   if (p.caso === 'limpieza' || paso === 15) return 'verde';
   return 'amarillo';
 }
@@ -76,7 +80,7 @@ export const PASO_TXT: Record<Paso, string> = { 3: '1.er mensaje', 7: '2.º mens
 export const SEMAFORO_INFO: Record<Semaforo, { corto: string; quienes: string; hacer: string }> = {
   rojo: {
     corto: 'Contactar hoy, primero',
-    quienes: 'Cancelaron o faltaron hace 3 días o menos, o son VIP, o suelen faltar (riesgo alto).',
+    quienes: 'Cancelaron o faltaron y no han reagendado, o son VIP, o suelen faltar (riesgo alto).',
     hacer: 'Contactarlos hoy, antes que a los demás.',
   },
   amarillo: {
@@ -100,6 +104,7 @@ export function porQueSemaforo(p: Paciente, hoy: string): string {
   const hace = dias <= 0 ? 'hoy' : `hace ${dias} ${dias === 1 ? 'día' : 'días'}`;
   if (color === 'rojo') {
     if (paso === 3) return `Pasó ${hace}: es el mejor momento para que vuelva`;
+    if (sinReagendar(p)) return `${p.caso === 'cancelo' ? 'Canceló' : 'No asistió'} ${hace} y no ha reagendado`;
     if (esVIP(p)) return `Es VIP (${(p.motivoVip ?? 'tratamiento de alto valor').toLowerCase()}): no se puede perder`;
     return `Suele faltar: ${p.fallosSeguidos} citas seguidas sin asistir`;
   }
@@ -174,6 +179,7 @@ export const RESULTADO_TXT: Record<Resultado, string> = {
   sin_respuesta: 'No respondió',
   lo_pensara: 'Lo va a pensar',
   no_interesa: 'No le interesa',
+  sin_whatsapp: 'Número inválido / sin WhatsApp',
 };
 
 export const pesos = (n: number) =>
@@ -228,3 +234,88 @@ export function nuevoCiclo(p: Paciente, caso: Caso, fechaEvento: string): Pacien
 }
 
 export const ultimoContacto = (p: Paciente) => p.contactos.at(-1) ?? p.ciclos.at(-1)?.contactos.at(-1);
+
+// ---------- lo que contó la clínica ----------
+// «Anulado» lo anula la clínica (no el paciente): no es culpa suya y se le ofrece disculpa
+export const anuladoPorClinica = (p: Paciente) => p.ultimaCita?.estado === 'Anulado';
+
+// Marcas que viajan como notas (hasta que el backend tenga campos propios): manda la más reciente
+const todasLasNotas = (p: Paciente) =>
+  [...p.notas.map((n) => n.texto), ...p.contactos.map((c) => c.nota ?? ''), ...p.ciclos.flatMap((c) => c.contactos.map((x) => x.nota ?? ''))];
+export const ADELANTAR = 'Quiere adelantar su cita';
+export const NO_ADELANTAR = 'Ya no quiere adelantar su cita';
+// marca sí/no guardada como nota: manda la última que aparezca (null = nunca se marcó)
+function marca(p: Paciente, si: string, no: string): boolean | null {
+  const ultima = todasLasNotas(p).filter((t) => t.includes(si) || t.includes(no)).at(-1);
+  return ultima === undefined ? null : !ultima.includes(no);
+}
+export const AUTORIZA = 'Autorizó escribirle por WhatsApp';
+export const NO_AUTORIZA = 'No autorizó escribirle por WhatsApp';
+export const consentimiento = (p: Paciente): boolean | null => (p.consentimientoWhatsapp !== undefined ? p.consentimientoWhatsapp : marca(p, AUTORIZA, NO_AUTORIZA));
+export const EN_CHAT = 'Ya tiene chat de WhatsApp con la clínica';
+export const SIN_CHAT = 'Ya no tiene chat de WhatsApp con la clínica';
+export const enChat = (p: Paciente) => p.enChatWhatsapp ?? marca(p, EN_CHAT, SIN_CHAT) ?? false;
+
+export function quiereAdelantar(p: Paciente): boolean {
+  if (p.quiereAdelantarCita !== undefined) return p.quiereAdelantarCita;
+  const ultima = todasLasNotas(p).filter((t) => t.includes(ADELANTAR) || t.includes(NO_ADELANTAR)).at(-1);
+  return !!ultima && !ultima.includes(NO_ADELANTAR);
+}
+
+// No volver a contactar: la clínica lo pidió para estos casos
+export const NO_CONTACTAR_TXT: Record<MotivoNoContactar, string> = {
+  no_le_interesa: 'No le interesa',
+  tratamiento_terminado: 'Tratamiento terminado',
+  queja_activa: 'Queja activa',
+  deuda_en_cobro: 'Deuda en cobro',
+  fallecido: 'Fallecido',
+};
+export const NO_CONTACTAR = Object.keys(NO_CONTACTAR_TXT) as MotivoNoContactar[];
+export const prefijoNoContactar = 'No contactar: ';
+// motivo por el que no se le vuelve a escribir (campo del backend o, mientras tanto, la nota que deja el panel)
+export function motivoNoContactar(p: Paciente): string | undefined {
+  if (p.noContactar !== undefined) return p.noContactar ? NO_CONTACTAR_TXT[p.motivoNoContactar ?? 'no_le_interesa'] : undefined;
+  if (p.estado !== 'descartado') return undefined;
+  const t = todasLasNotas(p).filter((x) => x.startsWith(prefijoNoContactar)).at(-1);
+  return t ? t.slice(prefijoNoContactar.length).split('.')[0] : 'No le interesa';
+}
+export const noContactar = (p: Paciente) => !!motivoNoContactar(p);
+
+// Perdido: más de 60 días sin volver (regla de la clínica)
+export const perdido = (p: Paciente, hoy: string) =>
+  p.perdido60 ?? ((p.estado === 'pendiente' || p.estado === 'agotado') && diasEntre(p.fechaEvento, hoy) > 60);
+export const tresCambiosFecha = (p: Paciente) => p.tresCambiosFecha ?? (p.cambiosFecha ?? 0) >= 3;
+export const esInternacional = (p: Paciente) => p.segmento === 'internacional' || p.idioma === 'en';
+
+// Horario de recepción (lun-vie 8-12 y 13-17): fuera de él no hay quién responda el WhatsApp
+export const enHorarioClinica = (d = new Date()) => {
+  const dia = d.getDay();
+  const h = d.getHours() + d.getMinutes() / 60;
+  return dia >= 1 && dia <= 5 && h >= 8 && h < 17;
+};
+
+// ---------- ocupación de la agenda (meta de la clínica: 85 %) ----------
+export const META_OCUPACION = 85;
+export const DIAS_TXT = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
+const diaSemana = (f: string) => {
+  const [y, m, d] = f.split('-').map(Number);
+  return new Date(y, m - 1, d).getDay(); // 0 = domingo
+};
+// Estimada: cada día con agenda de un especialista cuenta 8 h (8-12 y 13-17); lo libre son los cupos sin ocupar.
+// ponytail: capacidad fija de 8 h; con los horarios reales del equipo (o el endpoint /indicadores del backend) sería exacta.
+export function ocupacion(citas: { fecha: string; profesional: string }[], huecos: { fecha: string; especialista: string; minutos: number; ocupadoPor?: string; verificacion?: string }[], desde: string, dias = 14) {
+  const hasta = sumarDias(desde, dias - 1);
+  const enRango = (f: string) => f >= desde && f <= hasta && diaSemana(f) >= 1 && diaSemana(f) <= 5;
+  const agendas = new Set([...citas.filter((c) => enRango(c.fecha)).map((c) => `${c.fecha}|${c.profesional}`), ...huecos.filter((h) => enRango(h.fecha)).map((h) => `${h.fecha}|${h.especialista}`)]);
+  const cap = Array(5).fill(0);
+  const libre = Array(5).fill(0);
+  agendas.forEach((k) => (cap[diaSemana(k.split('|')[0]) - 1] += 480));
+  huecos.filter((h) => enRango(h.fecha) && !h.ocupadoPor && h.verificacion !== 'ocupado').forEach((h) => (libre[diaSemana(h.fecha) - 1] += h.minutos));
+  const pct = (c: number, l: number) => (c ? Math.max(0, Math.round(((c - l) / c) * 100)) : 0);
+  const total = cap.reduce((a, b) => a + b, 0);
+  return { pct: pct(total, libre.reduce((a, b) => a + b, 0)), hay: total > 0, porDia: DIAS_TXT.map((k, i) => ({ k, v: pct(cap[i], libre[i]), hay: cap[i] > 0 })) };
+}
+
+// acompañamiento de abonos: días 3 y 7 después de la valoración (campo del backend o, mientras tanto, por fecha)
+export const tocaAbono = (p: Paciente, hoy: string) =>
+  p.tocaAbonoHoy ?? (p.estado === 'pendiente' && p.grupo === 2 && [3, 7].includes(diasEntre(p.fechaEvento, hoy)));

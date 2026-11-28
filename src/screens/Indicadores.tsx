@@ -3,7 +3,7 @@ import { CalendarX, ChevronDown, Download, Lightbulb, TrendingUp, Wallet, type L
 import type { Caso, Datos, Grupo, Motivo, Paciente } from '../types';
 import { radiografia } from '../lib/excel';
 import { hojas } from '../lib/expediente';
-import { CASO_TXT, GRUPO_TXT, MOTIVO_TXT, PASOS, esVIP, fechaCorta, pesosCorto, sumarDias } from '../lib/reglas';
+import { CASO_TXT, GRUPO_TXT, META_OCUPACION, MOTIVO_TXT, PASOS, esVIP, fechaCorta, ocupacion, pesosCorto, sumarDias } from '../lib/reglas';
 import { Cifra, Encabezado, Pestanas, btnBorde } from '../components/ui';
 import { Tabla, descargarHojas } from '../components/Tabla';
 
@@ -12,7 +12,8 @@ import { Tabla, descargarHojas } from '../components/Tabla';
 export function Indicadores({ datos, hoy }: { datos: Datos; hoy: string }) {
   const { pacientes, huecos, campanas } = datos;
   const n = (f: (p: Paciente) => boolean) => pacientes.filter(f).length;
-  const r = radiografia(datos.citas);
+  const r = radiografia(datos.citas, hoy);
+  const oc = ocupacion(datos.citas, huecos, hoy);
 
   const pendientes = pacientes.filter((p) => p.estado === 'pendiente');
   const recuperados = pacientes.filter((p) => p.estado === 'recuperado');
@@ -178,7 +179,7 @@ export function Indicadores({ datos, hoy }: { datos: Datos; hoy: string }) {
       </div>
 
       <Seccion id="agenda" titulo="¿Cómo está la agenda?" sub="Qué pasó con las citas del archivo cargado.">
-        {r.total ? <Agenda r={r} /> : <Pista>Carga la agenda para ver cuántas citas se cumplen.</Pista>}
+        {r.total ? <Agenda r={r} oc={oc} /> : <Pista>Carga la agenda para ver cuántas citas se cumplen.</Pista>}
       </Seccion>
 
       <Seccion id="pacientes" titulo="¿Dónde están los pacientes?" sub="En qué punto está cada paciente y dónde está el dinero por recuperar.">
@@ -296,13 +297,16 @@ const pct = (n: number, t: number) => `${t ? Math.round((n / t) * 100) : 0} %`;
 const MESES: Record<string, string> = { '01': 'Ene', '02': 'Feb', '03': 'Mar', '04': 'Abr', '05': 'May', '06': 'Jun', '07': 'Jul', '08': 'Ago', '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dic' };
 
 // RF-07 / HU-05: diagnóstico de la agenda cargada
-function Agenda({ r }: { r: ReturnType<typeof radiografia> }) {
+const ETIQUETA_ESTADO: Record<string, string> = { Anulado: 'Anulado por la clínica', 'Anulado por pcte. via Whatsapp': 'Anulado por el paciente (WhatsApp)' };
+
+function Agenda({ r, oc }: { r: ReturnType<typeof radiografia>; oc: ReturnType<typeof ocupacion> }) {
   const maxMes = Math.max(1, ...r.meses.map(([, n]) => n));
   const partes = [
     { k: 'Atendidas', v: r.atendidas, cls: 'bg-verde' },
-    { k: 'Confirmadas o por confirmar', v: r.otras, cls: 'bg-ink/25' },
+    { k: 'Por venir', v: r.otras, cls: 'bg-ink/25' },
+    { k: '«Confirmado» pasadas: no vinieron, por depurar', v: r.porDepurar, cls: 'bg-amarillo' },
     { k: 'No se cumplieron', v: r.friccion, cls: 'bg-rojo' },
-  ];
+  ].filter((p) => p.v > 0);
   return (
     <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
       <Tarjeta titulo={`${r.total.toLocaleString('es-CO')} citas de ${r.pacientes.toLocaleString('es-CO')} pacientes`}>
@@ -320,7 +324,16 @@ function Agenda({ r }: { r: ReturnType<typeof radiografia> }) {
           ))}
         </ul>
         <p className="mb-3 mt-6 text-xs font-medium text-muted">Por qué no se cumplieron</p>
-        <Barras color="bg-rojo" filas={[...r.detalleFriccion].sort((a, b) => b.n - a.n).map((d) => ({ k: d.estado, v: d.n, extra: pct(d.n, r.total) }))} />
+        <Barras color="bg-rojo" filas={[...r.detalleFriccion].sort((a, b) => b.n - a.n).map((d) => ({ k: ETIQUETA_ESTADO[d.estado] ?? d.estado, v: d.n, extra: pct(d.n, r.total) }))} />
+        {r.whatsappFallida > 0 && (
+          <p className="mt-4 text-xs text-muted">
+            <b className="text-ink">{r.whatsappFallida}</b> recordatorios de WhatsApp fallaron (número malo o inactivo): esos pacientes salen marcados para revisar el número.
+          </p>
+        )}
+        <p className="mb-3 mt-6 text-xs font-medium text-muted">Citas que no se cumplieron, por día</p>
+        <Barras
+          filas={r.friccionPorDia.map((d) => ({ k: d.k, v: d.v, extra: pct(d.v, d.total), color: d.k === 'Lunes' || d.k === 'Miércoles' ? 'bg-rojo' : 'bg-ink/40' }))}
+        />
       </Tarjeta>
       <Tarjeta titulo="Citas por mes">
         <div className="flex h-32 items-end gap-3">
@@ -333,9 +346,24 @@ function Agenda({ r }: { r: ReturnType<typeof radiografia> }) {
           ))}
         </div>
         <div className="mt-5 space-y-3 border-t border-line pt-4">
-          <Reparto a={['Dra. López', r.sara]} b={['Dr. Olarte', r.olarte]} />
           <Reparto a={['Tratamiento', r.tratamiento]} b={['Diagnóstico', r.diagnostico]} />
+          <p className="pt-2 text-xs font-medium text-muted">Citas por especialista (usuario con que se agendó)</p>
+          <Barras filas={r.porProfesional.map((x) => ({ k: x.k, v: x.v, extra: pct(x.v, r.total) }))} />
         </div>
+        {oc.hay && (
+          <div className="mt-5 border-t border-line pt-4">
+            <p className="text-xs font-medium text-muted">
+              Ocupación próximos 14 días: <b className="text-ink">{oc.pct} %</b> · meta {META_OCUPACION} %
+            </p>
+            <div className="mt-3">
+              <Barras
+                formato={(x) => `${x} %`}
+                filas={oc.porDia.filter((d) => d.hay).map((d) => ({ k: d.k, v: d.v, color: d.v >= META_OCUPACION ? 'bg-verde' : d.k === 'Lunes' || d.k === 'Miércoles' ? 'bg-rojo' : 'bg-amarillo' }))}
+              />
+            </div>
+            <p className="mt-2 text-[11px] text-muted">Estimada: 8 h por día con agenda, menos los cupos libres.</p>
+          </div>
+        )}
       </Tarjeta>
     </div>
   );

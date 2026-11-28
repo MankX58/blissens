@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { BarChart3, CalendarClock, FileSpreadsheet, House, Megaphone, Sparkles, UserCog, Users } from 'lucide-react';
-import type { Campana, Datos, Hueco, Motivo, Paciente, Pantalla, Profesional, Resultado } from './types';
-import { ESPECIALISTAS, hoyISO, tocaHoy } from './lib/reglas';
+import type { Campana, Datos, Hueco, Motivo, MotivoNoContactar, Paciente, Pantalla, Profesional, Resultado } from './types';
+import { ESPECIALISTAS, NO_CONTACTAR_TXT, enHorarioClinica, hoyISO, prefijoNoContactar, tocaHoy } from './lib/reglas';
 import { siguientePaso } from './lib/campanas';
 import { puedeVer, type Rol } from './lib/roles';
 import { authClient, esRol } from './lib/auth';
@@ -95,9 +95,44 @@ interface Aviso {
   deshacer?: () => void;
 }
 
+// Modo demostración: nombres y contactos ocultos para mostrar el panel sin exponer pacientes reales
+const anonimizar = (d: Datos): Datos => {
+  const alias = new Map(d.pacientes.map((p, i) => [p.id, `Paciente ${String(i + 1).padStart(3, '0')}`]));
+  return {
+    ...d,
+    // texto clínico fuera: el tratamiento queda como el tipo de cita y se borran comentarios, notas y mensajes
+    pacientes: d.pacientes.map((p) => ({
+      ...p,
+      nombre: alias.get(p.id)!,
+      telefono: p.telefono && '+57 300 000 0000',
+      email: '',
+      apoderado: '',
+      ciudad: '',
+      notas: [],
+      tratamiento: p.ultimaCita?.tipo ?? 'Tratamiento',
+      valorReferencia: undefined,
+      contactos: p.contactos.map((c) => ({ ...c, mensaje: '', nota: undefined })),
+      ciclos: p.ciclos.map((c) => ({ ...c, contactos: c.contactos.map((x) => ({ ...x, mensaje: '', nota: undefined })) })),
+    })),
+    citas: d.citas.map((c) => ({ ...c, comentario: undefined })),
+    campanas: d.campanas.map((c) => ({ ...c, plantilla: c.plantilla, envios: c.envios.map((e) => ({ ...e, nombre: alias.get(e.pacienteId) ?? 'Paciente', telefono: '+57 300 000 0000', texto: e.texto.replace(/^(Hola|Hello),? [^.]+\./, '$1, {nombre}.') })) })),
+  };
+};
+const leerDemo = () => {
+  try {
+    return localStorage.getItem('blissens-demo') === '1';
+  } catch {
+    return false;
+  }
+};
+
 function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
-  const [datos, setDatos] = useState(inicial);
+  const [real, setDatos] = useState(inicial);
+  const [demo, setDemo] = useState(leerDemo);
+  const datos = demo ? anonimizar(real) : real;
   const { pacientes, huecos, campanas } = datos;
+  // números donde un recordatorio de WhatsApp ya falló (dato del software: «Notif. WhatsApp fallida»)
+  const fallidos = new Set(datos.citas.filter((c) => c.estado === 'Notif. WhatsApp fallida').map((c) => `#${c.paciente}`));
   const hoy = datos.fechaCorte; // fecha de trabajo (la del backend; por defecto, el cierre de la agenda cargada)
   const inicio: Pantalla = 'inicio';
   const [pantalla, setPantalla] = useState<Pantalla>(inicio);
@@ -122,15 +157,15 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
   }, [pantalla, expediente]);
 
   // ---------- acciones: cada una va al backend y aplica lo que él devuelve ----------
-  const ref = useRef(datos);
-  ref.current = datos;
+  const ref = useRef(real);
+  ref.current = real;
   const ponerPaciente = (p: Paciente) =>
     setDatos((d) => ({ ...d, pacientes: d.pacientes.some((x) => x.id === p.id) ? d.pacientes.map((x) => (x.id === p.id ? p : x)) : [p, ...d.pacientes] }));
   const ponerHueco = (h: Hueco) => setDatos((d) => ({ ...d, huecos: d.huecos.some((x) => x.id === h.id) ? d.huecos.map((x) => (x.id === h.id ? h : x)) : [...d.huecos, h] }));
   const ponerCampana = (c: Campana) =>
     setDatos((d) => ({ ...d, campanas: d.campanas.some((x) => x.id === c.id) ? d.campanas.map((x) => (x.id === c.id ? c : x)) : [c, ...d.campanas] }));
   const nombre = (id?: string) => pacientes.find((p) => p.id === id)?.nombre.split(' ')[0] ?? 'Paciente';
-  const recargar = () => api.panel().then(setDatos);
+  const recargar = () => api.panel(demo).then(setDatos);
 
   // envuelve una llamada: si falla, avisa con el mensaje del backend (la sesión vencida vuelve al login)
   const intentar = async <T,>(accion: () => Promise<T>): Promise<T | undefined> => {
@@ -150,7 +185,9 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
     if (!puedeVer(usuario.rol, 'campanas')) return;
     const t = setInterval(async () => {
       if (ocupado.current) return;
-      const c = ref.current.campanas.find((x) => siguientePaso(x, Date.now()).tipo !== 'nada');
+      // sin API (WhatsApp Web) el envío lo hace recepción a mano; con API, solo en horario para poder atender respuestas
+      if (!enHorarioClinica()) return;
+      const c = ref.current.campanas.find((x) => x.canal === 'api' && siguientePaso(x, Date.now()).tipo !== 'nada');
       if (!c) return;
       ocupado.current = true;
       try {
@@ -165,9 +202,11 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
     return () => clearInterval(t);
   }, []);
 
-  const guardarContacto = async (p: Paciente, r: Resultado, mensaje: string, motivo: Motivo, nota: string) => {
-    const act = await intentar(() => api.contactar(p.id, { resultado: r, mensaje, motivo, nota: nota || undefined }));
+  const guardarContacto = async (p: Paciente, r: Resultado, mensaje: string, motivo: Motivo, nota: string, nc?: MotivoNoContactar) => {
+    let act = await intentar(() => api.contactar(p.id, { resultado: r, mensaje, motivo, nota: nota || undefined }));
     if (!act) return;
+    // el motivo tipificado de NO contactar (si el backend ya tiene el endpoint; si no, quedó en la nota)
+    if (nc) act = (await api.noContactar(p.id, nc, '').catch(() => undefined)) ?? act;
     ponerPaciente(act);
     setContactando(null);
     setAviso({ texto: r === 'agendo' ? `${nombre(p.id)} recuperado` : `Contacto con ${nombre(p.id)} guardado`, exito: r === 'agendo' });
@@ -322,6 +361,17 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
         onFecha={(f) => configurar({ fecha_corte: f })}
         onAsesora={(a) => configurar({ asesora: a })}
         onRestaurar={puedeVer(usuario.rol, 'cargar') ? restaurar : undefined}
+        demo={demo}
+        onDemo={(v: boolean) => {
+          setDemo(v);
+          intentar(() => api.panel(v).then(setDatos));
+          setDemo(v);
+          try {
+            localStorage.setItem('blissens-demo', v ? '1' : '0');
+          } catch {
+            /* sin almacenamiento: dura hasta recargar */
+          }
+        }}
       />
 
       <main id="contenido" ref={principal} tabIndex={-1} aria-label={items.find((x) => x.id === pantalla)?.t} className="pb-24 outline-none lg:pb-0 lg:pl-[264px]">
@@ -346,9 +396,9 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
                 const act = await intentar(() => api.reactivar(id));
                 if (act) (ponerPaciente(act), setAviso({ texto: 'Paciente reactivado: empieza un nuevo 3-7-15 hoy' }));
               }}
-              onDescartar={async (id) => {
-                const act = await intentar(() => api.descartar(id));
-                if (act) (ponerPaciente(act), setAviso({ texto: 'Paciente sacado del seguimiento' }));
+              onDescartar={async (id, motivo) => {
+                const act = await intentar(() => api.noContactar(id, motivo, `${prefijoNoContactar}${NO_CONTACTAR_TXT[motivo]}.`));
+                if (act) (ponerPaciente(act), setAviso({ texto: `No se volverá a contactar: ${NO_CONTACTAR_TXT[motivo].toLowerCase()}` }));
               }}
               onCrear={async (nuevo) => {
                 const p = await intentar(() => api.crearPaciente(nuevo));
@@ -421,6 +471,11 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
                 const c = await intentar(() => api.accionCampana(id, accion));
                 if (c) ponerCampana(c);
               }}
+              hoy={hoy}
+              onEnviarManual={async (id: string, envio: string) => {
+                const c = await intentar(() => api.marcarEnviadoWeb(id, envio));
+                if (c) ponerCampana(c);
+              }}
               onRespuesta={async (id, envio, respondio) => {
                 const c = await intentar(() => api.respuesta(id, envio, respondio));
                 if (c) ponerCampana(c);
@@ -445,6 +500,7 @@ function Panel({ inicial, usuario }: { inicial: Datos; usuario: Usuario }) {
         onGuardar={guardarContacto}
         onTelefono={cambiarTelefono}
         onReasignar={reasignar}
+        whatsappFallido={!!contactando && fallidos.has(contactando.idPaciente)}
       />
 
       {/* región viva siempre montada: los lectores de pantalla anuncian cada aviso */}

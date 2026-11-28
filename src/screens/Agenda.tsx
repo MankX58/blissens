@@ -4,7 +4,7 @@ import type { Datos, Franja, Hueco, Paciente, Pausa, Profesional } from '../type
 import { api } from '../lib/api';
 import { resumenHorario } from './Cuentas';
 import { fechaLarga, guionHueco, horaLarga, oficial, rellenar, N_UBICACION } from '../lib/guiones';
-import { CASO_TXT, ESPECIALISTAS, ESTADO_TXT, esVIP, diasEntre, fechaCorta, linkWhatsApp, pesosCorto, riesgoAlto, sumarDias } from '../lib/reglas';
+import { CASO_TXT, ESPECIALISTAS, ESTADO_TXT, esVIP, diasEntre, fechaCorta, linkWhatsApp, noContactar, pesosCorto, quiereAdelantar, riesgoAlto, sumarDias } from '../lib/reglas';
 import { Encabezado, Etiqueta, Iniciales, InsigniaRiesgo, Insignias, Vacio, btnBorde, btnChico, btnNegro } from '../components/ui';
 
 // ---------- estado de cada cupo: dice qué hay que hacer con él ----------
@@ -44,7 +44,9 @@ export const haceTexto = (h: number) =>
   h < 1 ? 'hace menos de una hora' : h < 24 ? `hace ${Math.round(h)} h` : `hace ${Math.floor(h / 24)} ${Math.floor(h / 24) === 1 ? 'día' : 'días'}`;
 
 const clave = (h: Hueco) => `${h.fecha}|${h.hora}|${h.especialista}`;
-const dr = (e: Profesional) => (e === 'Dra. Sara López' ? 'Dra. Sara' : 'Dr. Olarte');
+const dr = (e: Profesional) => (e === 'Dra. Sara López' ? 'Dra. Sara' : e === 'Dr. Juan Esteban' ? 'Dr. Juan Esteban' : 'Dr. Olarte');
+// un cupo con más de 24 h se ofrece con calma; el del mismo día, a quien pueda venir ya (la clínica acepta ambos)
+const ventana = (h: Hueco, hoy: string) => h.ventanaAnticipacion ?? (h.fecha <= sumarDias(hoy, 1) ? 'mismo_dia' : 'mas_24h');
 const horaFin = (h: Hueco) => {
   const [hh, mm] = h.hora.split(':').map(Number);
   const t = hh * 60 + mm + h.minutos;
@@ -77,7 +79,9 @@ function candidatos(h: Hueco, pacientes: Paciente[], f: Filtros) {
   return pacientes
     .filter(
       (p) =>
-        (p.estado === 'pendiente' || p.estado === 'agotado') &&
+        // en seguimiento, o con cita pero pidió adelantarla (la clínica quiere marcar a esos pacientes)
+        (p.estado === 'pendiente' || p.estado === 'agotado' || (p.estado === 'activo' && quiereAdelantar(p))) &&
+        !noContactar(p) &&
         !ofrecidos.has(p.id) &&
         (p.especialista === h.especialista || (cruzar && p.especialista === 'Dr. Juan Manuel Olarte')) &&
         (!f.tipo || p.ultimaCita?.tipo === f.tipo) &&
@@ -86,6 +90,9 @@ function candidatos(h: Hueco, pacientes: Paciente[], f: Filtros) {
     )
     .sort((a, b) => {
       if (!!a.telefono !== !!b.telefono) return a.telefono ? -1 : 1;
+      if (quiereAdelantar(a) !== quiereAdelantar(b)) return quiereAdelantar(a) ? -1 : 1;
+      // cupo de primera valoración (45 min): primero los valorados que no han iniciado
+      if (h.tipoCupo === 'valoracion_45' && (a.grupo === 2) !== (b.grupo === 2)) return a.grupo === 2 ? -1 : 1;
       if ((a.especialista === h.especialista) !== (b.especialista === h.especialista)) return a.especialista === h.especialista ? -1 : 1;
       if (esVIP(a) !== esVIP(b)) return esVIP(a) ? -1 : 1;
       return b.valor - a.valor;
@@ -326,7 +333,10 @@ function Detalle({ h, e, ...p }: Props & { h: Hueco; e: EstadoEspacio }) {
               {h.hora} <span className="text-white/60">–</span> {horaFin(h)}
             </p>
             <p className="mt-1 text-sm text-white/70">
-              {h.especialista} · {h.minutos} min · {h.origen === 'calculado' ? `Tiempo libre de su horario · agenda cargada ${haceTexto(horasDesdeCarga(p.ultimaCarga))}` : 'Agregado a mano'}
+              {h.especialista} · {h.minutos} min{h.tipoCupo === 'valoracion_45' ? ' · primera valoración' : ''} · {h.origen === 'calculado' ? `Tiempo libre de su horario · agenda cargada ${haceTexto(horasDesdeCarga(p.ultimaCarga))}` : 'Agregado a mano'}
+            </p>
+            <p className="mt-1 text-xs text-white/55">
+              {ventana(h, p.hoy) === 'mismo_dia' ? 'Mismo día o mañana: ofrézcalo primero a quien quiere adelantar su cita.' : 'Con más de 24 h: hay tiempo para ofrecerlo y confirmar.'}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -487,8 +497,9 @@ function Candidato({ x, h, hoy, asesora, onAbrir, onOfrecer, onAsignar }: { x: P
           <button onClick={() => onAbrir(x.id)} className="mr-1 font-medium hover:underline">
             {x.nombre}
           </button>
-          <Insignias p={x} />
-          {x.especialista !== h.especialista && <Etiqueta tono="oscuro">Del Dr. Olarte</Etiqueta>}
+          <Insignias p={x} hoy={hoy} />
+          {x.especialista !== h.especialista && <Etiqueta tono="oscuro">De {dr(x.especialista)}</Etiqueta>}
+          {x.estado === 'activo' && <Etiqueta>Ya tiene cita</Etiqueta>}
         </span>
         <span className="block truncate text-xs text-muted">
           {CASO_TXT[x.caso]} {diasEntre(x.fechaEvento, hoy) >= 0 ? `hace ${diasEntre(x.fechaEvento, hoy)} días` : `· seguimiento desde el ${fechaCorta(x.fechaEvento)}`} · {x.tratamiento} ·{' '}
@@ -626,18 +637,19 @@ function NuevoEspacio({ hoy, onGuardar, onCancelar }: { hoy: string; onGuardar: 
   const [fecha, setFecha] = useState(sumarDias(hoy, 1));
   const [hora, setHora] = useState('09:00');
   const [minutos, setMinutos] = useState(60);
+  const [tipo, setTipo] = useState<'control' | 'valoracion_45'>('control');
   const [especialista, setEspecialista] = useState<Profesional>(ESPECIALISTAS[0]);
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onGuardar({ id: `h-${Date.now()}`, fecha, hora, minutos, especialista, origen: 'manual', ofertas: [] });
+        onGuardar({ id: `h-${Date.now()}`, fecha, hora, minutos, especialista, origen: 'manual', ofertas: [], tipoCupo: tipo });
       }}
       className="hoja card mt-6 p-5"
     >
       <p className="font-semibold">¿Qué cupo se liberó?</p>
       <p className="text-xs text-muted">Solo para lo que el cálculo aún no ve, como una cancelación que llegó por WhatsApp y todavía no está en el Excel.</p>
-      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_1fr_1.6fr_auto] sm:items-end">
+      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_1.3fr_1fr_1.6fr_auto] sm:items-end">
         <label className="text-xs font-medium text-muted">
           Fecha
           <input type="date" min={hoy} required value={fecha} onChange={(e) => setFecha(e.target.value)} className="field mt-1" />
@@ -645,6 +657,21 @@ function NuevoEspacio({ hoy, onGuardar, onCancelar }: { hoy: string; onGuardar: 
         <label className="text-xs font-medium text-muted">
           Hora
           <input type="time" required value={hora} onChange={(e) => setHora(e.target.value)} className="field mt-1" />
+        </label>
+        <label className="text-xs font-medium text-muted">
+          Tipo
+          <select
+            value={tipo}
+            onChange={(e) => {
+              const t = e.target.value as typeof tipo;
+              setTipo(t);
+              if (t === 'valoracion_45') setMinutos(45); // la primera valoración dura 45 min
+            }}
+            className="field mt-1"
+          >
+            <option value="control">Control / tratamiento</option>
+            <option value="valoracion_45">Primera valoración</option>
+          </select>
         </label>
         <label className="text-xs font-medium text-muted">
           Duración

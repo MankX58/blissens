@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import type { Estado, Paciente } from '../types';
-import { ESTADO_TXT, SEMAFORO_INFO, esVIP, fechaCorta, riesgoAlto, type Semaforo } from '../lib/reglas';
+import { ESTADO_TXT, SEMAFORO_INFO, esVIP, fechaCorta, motivoNoContactar, perdido, quiereAdelantar, riesgoAlto, tresCambiosFecha, type Semaforo } from '../lib/reglas';
 
 export const SEMAFORO_TXT: Record<Semaforo, string> = {
   rojo: 'Urgente',
@@ -62,11 +62,17 @@ export function InsigniaRiesgo({ p, oscuro = false, detalle = false }: { p: Paci
   );
 }
 
-export function Insignias({ p, oscuro = false, detalle = false }: { p: Paciente; oscuro?: boolean; detalle?: boolean }) {
+export function Insignias({ p, oscuro = false, detalle = false, hoy }: { p: Paciente; oscuro?: boolean; detalle?: boolean; hoy?: string }) {
+  const nc = motivoNoContactar(p);
+  const tono = oscuro ? 'bg-white/10 text-white/80' : 'bg-soft text-ink/75';
   return (
     <>
+      {nc && <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${oscuro ? 'bg-rojo/25 text-[#ffb4b7]' : 'bg-rojo/10 text-rojo'}`} title="La clínica pidió no volver a escribirle">No contactar · {nc}</span>}
       <InsigniaVIP p={p} />
       <InsigniaRiesgo p={p} oscuro={oscuro} detalle={detalle} />
+      {(hoy ? perdido(p, hoy) : !!p.perdido60) && <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${tono}`} title="Más de 60 días sin volver">Perdido +60 d</span>}
+      {tresCambiosFecha(p) && <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${tono}`} title={`${p.cambiosFecha ?? 3} cambios de fecha en su historial`}>3+ cambios de fecha</span>}
+      {quiereAdelantar(p) && <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${oscuro ? 'bg-verde/25 text-white' : 'bg-verde/12 text-verde'}`}>Quiere adelantar su cita</span>}
     </>
   );
 }

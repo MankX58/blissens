@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react';
 import { ArrowRight, Check, ChevronDown, Download, MessageCircle, Pause, Play, Plus, RotateCcw, Send, Trash2, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { Campana, EstadoEnvio, Paciente } from '../types';
-import { AUDIENCIAS, ESTADO_CAMPANA_TXT, personalizar } from '../lib/campanas';
+import { AUDIENCIAS, ESTADO_CAMPANA_TXT, personalizar, proximoHorario } from '../lib/campanas';
+import { TEXTO_AUTORIZACION } from '../lib/guiones';
 import type { AccionCampana, NuevaCampana } from '../lib/api';
-import { linkWhatsApp } from '../lib/reglas';
+import { consentimiento, enHorarioClinica, linkWhatsApp, noContactar, normalizarCelular } from '../lib/reglas';
 import { Encabezado, Etiqueta, Modal, Vacio, btnBorde, btnChico, btnIris, btnNegro } from '../components/ui';
 
 const RITMOS: [number, string][] = [
@@ -23,11 +24,13 @@ const ESTADO_ENVIO: Record<EstadoEnvio, { t: string; tono: 'claro' | 'ok' | 'mal
 };
 
 const duracion = (seg: number) => (seg < 60 ? `${seg} s` : seg < 3600 ? `${Math.round(seg / 60)} min` : `${(seg / 3600).toFixed(1)} h`);
+const aLocal = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 const ahoraLocal = () => {
   const d = new Date(Date.now() + 60 * 60 * 1000);
   d.setMinutes(0, 0, 0);
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  return aLocal(proximoHorario(d));
 };
+const HORARIO_TXT = 'lunes a viernes de 8:00 a 12:00 y de 13:00 a 17:00';
 
 export function Campanas({
   pacientes,
@@ -38,7 +41,11 @@ export function Campanas({
   onRespuesta,
   onBorrar,
   onAbrir,
+  hoy,
+  onEnviarManual,
 }: {
+  hoy: string;
+  onEnviarManual: (id: string, envio: string) => void;
   pacientes: Paciente[];
   campanas: Campana[];
   whatsapp: { conectado: boolean; modo: string };
@@ -48,14 +55,23 @@ export function Campanas({
   onBorrar: (id: string) => void;
   onAbrir?: (id: string) => void; // campañas no abre expedientes clínicos
 }) {
-  const conectada = whatsapp.conectado;
+  // solo cuenta como API real si el modo es Meta Cloud; si no, la clínica envía por WhatsApp Web (cola asistida)
+  const conectada = whatsapp.conectado && whatsapp.modo === 'meta_cloud';
   const [verConfig, setVerConfig] = useState(false);
+  const [verAutorizacion, setVerAutorizacion] = useState(false);
   const [nueva, setNueva] = useState<string | null>(null); // id de la audiencia con la que abre el asistente
 
-  // quién puede recibir: en seguimiento o sin respuesta al 3-7-15, y con celular
-  const posibles = (filtro: (p: Paciente) => boolean) =>
-    pacientes.filter((p) => (p.estado === 'pendiente' || p.estado === 'agotado') && p.telefono && filtro(p));
-  const audiencias = useMemo(() => AUDIENCIAS.map((a) => ({ ...a, n: posibles(a.filtro).length })), [pacientes]);
+  // quién puede recibir: con celular válido, sin «no contactar» y sin negar la autorización de WhatsApp
+  const posibles = (a: Pick<(typeof AUDIENCIAS)[number], 'filtro' | 'estados'>) =>
+    pacientes.filter(
+      (p) =>
+        (a.estados ?? ['pendiente', 'agotado']).includes(p.estado) &&
+        !!normalizarCelular(p.telefono) &&
+        !noContactar(p) &&
+        consentimiento(p) !== false &&
+        a.filtro(p, hoy)
+    );
+  const audiencias = useMemo(() => AUDIENCIAS.map((a) => ({ ...a, n: posibles(a).length })), [pacientes, hoy]);
   const sugeridas = [...audiencias].filter((a) => a.n > 0).sort((a, b) => Number(b.id === 'agotado') - Number(a.id === 'agotado') || b.n - a.n).slice(0, 3);
 
   const envios = campanas.flatMap((c) => c.envios);
@@ -65,15 +81,38 @@ export function Campanas({
 
   return (
     <div className="space-y-8">
-      <Encabezado titulo="Campañas" descripcion="Mensajes de WhatsApp a un grupo de pacientes, uno tras otro y personalizados, para recuperar a quien el seguimiento diario no alcanzó.">
-        <button onClick={() => setVerConfig(true)} className={`${btnBorde} gap-2`}>
-          <span className={`size-2 rounded-full ${conectada ? 'bg-verde' : 'bg-amarillo'}`} aria-hidden />
-          {conectada ? 'WhatsApp conectado' : 'Modo simulación'}
-        </button>
-        <button onClick={() => setNueva(sugeridas[0]?.id ?? AUDIENCIAS[0].id)} className={btnNegro}>
-          <Plus className="size-4" aria-hidden /> Nueva campaña
-        </button>
-      </Encabezado>
+      <div className="space-y-4">
+        <Encabezado titulo="Campañas" descripcion="Mensajes de WhatsApp personalizados a un grupo de pacientes, para recuperar a quien el seguimiento diario no alcanzó.">
+          <button onClick={() => setNueva(sugeridas[0]?.id ?? AUDIENCIAS[0].id)} className={`${btnNegro} shrink-0`}>
+            <Plus className="size-4" aria-hidden /> Nueva campaña
+          </button>
+        </Encabezado>
+
+        {/* canal de envío: cómo salen los mensajes y en qué horario, con sus dos ayudas a un clic */}
+        <div className="entrar flex flex-col gap-3 rounded-2xl border border-line bg-white/70 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <p className="flex min-w-0 items-start gap-2.5">
+            <span className="relative mt-1.5 flex size-2 shrink-0" aria-hidden>
+              <span className={`absolute inset-0 rounded-full ${conectada ? 'bg-verde' : 'bg-amarillo'} ${enHorarioClinica() ? 'animate-ping opacity-60' : ''}`} />
+              <span className={`relative size-2 rounded-full ${conectada ? 'bg-verde' : 'bg-amarillo'}`} />
+            </span>
+            <span className="min-w-0">
+              <b className="font-semibold">{conectada ? 'WhatsApp Business conectado' : 'Envío asistido por WhatsApp Web'}</b>
+              <span className="text-muted">
+                {' · '}
+                {conectada ? 'los mensajes salen solos' : 'un clic abre cada mensaje listo para enviar'} · {enHorarioClinica() ? 'en horario de recepción' : 'fuera de horario (L-V 8-12 y 13-17)'}
+              </span>
+            </span>
+          </p>
+          <span className="flex shrink-0 gap-1 pl-[18px] sm:pl-0">
+            <button onClick={() => setVerConfig(true)} className={`${btnChico} whitespace-nowrap text-ink/70 hover:bg-soft hover:text-ink`}>
+              ¿Cómo funciona?
+            </button>
+            <button onClick={() => setVerAutorizacion(true)} className={`${btnChico} whitespace-nowrap bg-soft text-ink/80 hover:text-ink`}>
+              Formato de autorización
+            </button>
+          </span>
+        </div>
+      </div>
 
       {/* resumen */}
       <dl className="entrar card grid grid-cols-3 gap-px overflow-hidden bg-line p-0">
@@ -130,7 +169,7 @@ export function Campanas({
         ) : (
           <div className="escalonado space-y-3">
             {campanas.map((c) => (
-              <TarjetaCampana key={c.id} c={c} onAccion={onAccion} onRespuesta={onRespuesta} onBorrar={onBorrar} onAbrir={onAbrir} />
+              <TarjetaCampana key={c.id} c={c} onAccion={onAccion} onRespuesta={onRespuesta} onBorrar={onBorrar} onAbrir={onAbrir} onEnviarManual={onEnviarManual} />
             ))}
           </div>
         )}
@@ -151,6 +190,23 @@ export function Campanas({
         />
       )}
       <ComoConectar abierto={verConfig} conectado={conectada} onCerrar={() => setVerConfig(false)} />
+      <Modal abierto={verAutorizacion} onCerrar={() => setVerAutorizacion(false)} titulo="Formato de autorización" ancho="max-w-xl">
+        <div className="p-6 sm:p-8">
+          <h2 className="text-2xl font-bold tracking-tight">Autorización para escribir por WhatsApp</h2>
+          <p className="mt-2 text-sm text-muted">
+            Envíelo antes de incluir a un paciente en campañas (Ley 1581 de 2012). Registre la respuesta en «Contactar» o en la ficha: quien responde «No» queda fuera de las campañas.
+          </p>
+          <p className="mt-4 whitespace-pre-line rounded-2xl bg-soft p-4 text-sm leading-relaxed">{TEXTO_AUTORIZACION.replace('[NOMBRE]', '{nombre}')}</p>
+          <div className="mt-6 flex justify-end gap-2">
+            <button onClick={() => navigator.clipboard?.writeText(TEXTO_AUTORIZACION.replace('Hola, [NOMBRE]. ', 'Hola. ')).catch(() => undefined)} className={btnBorde}>
+              Copiar
+            </button>
+            <button onClick={() => setVerAutorizacion(false)} className={btnNegro}>
+              Listo
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -168,7 +224,7 @@ function Asistente({
 }: {
   inicial: string;
   audiencias: ((typeof AUDIENCIAS)[number] & { n: number })[];
-  posibles: (filtro: (p: Paciente) => boolean) => Paciente[];
+  posibles: (a: Pick<(typeof AUDIENCIAS)[number], 'filtro' | 'estados'>) => Paciente[];
   conectada: boolean;
   onCerrar: () => void;
   onCrear: (c: NuevaCampana) => Promise<boolean>;
@@ -185,7 +241,8 @@ function Asistente({
   const [quitados, setQuitados] = useState<Set<string>>(new Set());
   const [lanzando, setLanzando] = useState(false);
 
-  const lista = useMemo(() => posibles(aud.filtro), [aud]);
+  const lista = useMemo(() => posibles(aud), [aud]);
+  const fueraDeHorario = cuando === 'ahora' ? !enHorarioClinica() : !enHorarioClinica(new Date(fecha));
   const elegidos = lista.filter((p) => !quitados.has(p.id));
   const elegirAudiencia = (id: string) => {
     const a = AUDIENCIAS.find((x) => x.id === id)!;
@@ -321,6 +378,20 @@ function Asistente({
                 </select>
                 <span className="mt-1 block text-xs font-normal text-muted">Enviar con pausas evita que WhatsApp marque el número como spam.</span>
               </label>
+              {fueraDeHorario && (
+                <p className="rounded-2xl border border-amarillo/40 bg-amarillo/10 p-3 text-xs leading-relaxed">
+                  <b>Fuera del horario de recepción</b> ({HORARIO_TXT}): nadie podrá responder a quien conteste.{' '}
+                  <button
+                    onClick={() => {
+                      setCuando('programar');
+                      setFecha(aLocal(proximoHorario()));
+                    }}
+                    className="font-semibold underline"
+                  >
+                    Programar para el próximo horario
+                  </button>
+                </p>
+              )}
               <details className="group rounded-2xl border border-line">
                 <summary className="flex cursor-pointer list-none items-center justify-between p-4 text-sm [&::-webkit-details-marker]:hidden">
                   <span>
@@ -366,9 +437,11 @@ function Asistente({
                   1 cada {ritmo} s · ≈ {duracion(elegidos.length * ritmo)}
                 </li>
                 <li>{cuando === 'ahora' ? 'Empieza al lanzarla' : `Empieza el ${new Date(fecha).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}`}</li>
-                <li>{conectada ? 'Sale por WhatsApp Business' : 'Modo simulación: se registra pero no sale'}</li>
+                <li>{conectada ? 'Sale por WhatsApp Business' : 'WhatsApp Web: recepción abre cada mensaje con un clic y lo envía'}</li>
               </ul>
-              <p className="mt-3 text-xs text-muted">El envío avanza mientras el panel esté abierto.</p>
+              <p className="mt-3 text-xs text-muted">
+                {conectada ? `El envío avanza mientras el panel esté abierto, solo ${HORARIO_TXT}.` : 'Quedan fuera: números inválidos, «no contactar» y quien no autorizó WhatsApp.'}
+              </p>
             </div>
           </div>
         )}
@@ -413,7 +486,9 @@ function TarjetaCampana({
   onRespuesta,
   onBorrar,
   onAbrir,
+  onEnviarManual,
 }: {
+  onEnviarManual: (id: string, envio: string) => void;
   c: Campana;
   onAccion: (id: string, accion: AccionCampana) => void;
   onRespuesta: (id: string, envio: string, respondio: boolean) => void;
@@ -426,6 +501,7 @@ function TarjetaCampana({
   const hechos = c.envios.filter((x) => x.estado !== 'pendiente').length;
   const activa = c.estado === 'enviando' || c.estado === 'programada';
   const programadaFutura = c.estado === 'programada' && Date.parse(c.inicio) > Date.now();
+  const siguiente = c.envios.find((e) => e.estado === 'pendiente');
 
   const descargar = () => {
     const libro = XLSX.utils.book_new();
@@ -448,10 +524,10 @@ function TarjetaCampana({
                 <span className={`size-1.5 rounded-full ${c.estado === 'enviando' ? 'latido bg-lilac' : c.estado === 'completada' ? 'bg-verde' : c.estado === 'cancelada' ? 'bg-rojo' : 'bg-ink/40'}`} />
                 {programadaFutura ? `Programada · ${new Date(c.inicio).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}` : ESTADO_CAMPANA_TXT[c.estado]}
               </span>
-              <Etiqueta>{c.canal === 'api' ? 'WhatsApp API' : 'Simulación'}</Etiqueta>
+              <Etiqueta>{c.canal === 'api' ? 'WhatsApp API' : 'WhatsApp Web'}</Etiqueta>
             </div>
             <p className="mt-1 text-sm text-muted">
-              {c.audiencia} · {c.envios.length} pacientes · 1 mensaje cada {c.ritmoSeg} s
+              {c.audiencia} · {c.envios.length} pacientes{c.canal === 'api' ? ` · 1 mensaje cada ${c.ritmoSeg} s` : ' · envío asistido'}
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -488,6 +564,25 @@ function TarjetaCampana({
             )}
           </div>
         </div>
+
+        {/* cola asistida (WhatsApp Web sin API): un clic abre el chat con el mensaje listo y lo marca como enviado */}
+        {c.canal === 'simulado' && (c.estado === 'enviando' || c.estado === 'programada') && siguiente && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-soft p-3">
+            <a
+              href={linkWhatsApp(siguiente.telefono, siguiente.texto)}
+              target="_blank"
+              rel="noopener"
+              onClick={() => siguiente.id && onEnviarManual(c.id, siguiente.id)}
+              className={btnNegro}
+            >
+              <MessageCircle className="size-4" aria-hidden /> Abrir siguiente: {siguiente.nombre.split(' ')[0]}
+            </a>
+            <span className="text-xs text-muted">
+              {hechos + 1} de {c.envios.length} · se marca enviado al abrirlo
+              {!enHorarioClinica() && <b className="ml-1 text-amarillo">· fuera del horario de recepción</b>}
+            </span>
+          </div>
+        )}
 
         {/* progreso */}
         <div className="mt-5 flex h-2.5 overflow-hidden rounded-full bg-soft" role="img" aria-label={`${hechos} de ${c.envios.length} procesados`}>
@@ -556,16 +651,31 @@ function TarjetaCampana({
 // La conexión con WhatsApp Business vive en el servidor: el token nunca pasa por el navegador
 function ComoConectar({ abierto, conectado, onCerrar }: { abierto: boolean; conectado: boolean; onCerrar: () => void }) {
   return (
-    <Modal abierto={abierto} onCerrar={onCerrar} titulo="Conexión con WhatsApp Business" ancho="max-w-xl">
+    <Modal abierto={abierto} onCerrar={onCerrar} titulo="Cómo salen los mensajes" ancho="max-w-xl">
       <div className="p-6 sm:p-8">
-        <h2 className="text-2xl font-bold tracking-tight">Conexión con WhatsApp Business</h2>
+        <h2 className="text-2xl font-bold tracking-tight">Cómo salen los mensajes</h2>
         <p className="mt-2 text-sm text-muted">
           {conectado
             ? 'El servidor está conectado a WhatsApp Cloud API: las campañas salen desde el número de la clínica.'
-            : 'Ahora mismo las campañas corren en modo simulación: quedan registradas, pero los mensajes no salen.'}
+            : 'La clínica envía desde WhatsApp Web: el panel arma la cola y recepción envía cada mensaje con un clic.'}
         </p>
+        {!conectado && (
+          <ol className="mt-4 space-y-2 text-sm leading-relaxed">
+            {[
+              'Cree la campaña: el panel deja fuera números inválidos, «no contactar» y a quien no autorizó WhatsApp.',
+              'En la tarjeta de la campaña toque «Abrir siguiente»: se abre el chat con el mensaje ya escrito.',
+              'Envíelo en WhatsApp y vuelva: el panel lo marca como enviado y prepara el siguiente.',
+              'Hágalo en horario de recepción (L-V 8-12 y 13-17) para poder atender a quien responda.',
+            ].map((t, i) => (
+              <li key={t} className="flex gap-2.5">
+                <span className="num grid size-5 shrink-0 place-items-center rounded-full bg-ink text-[11px] font-bold text-white">{i + 1}</span>
+                {t}
+              </li>
+            ))}
+          </ol>
+        )}
         <div className="mt-5 rounded-2xl bg-soft p-4 text-sm leading-relaxed">
-          <p className="font-semibold">Para enviar de verdad, quien administra el servidor configura en el .env del backend:</p>
+          <p className="font-semibold">{conectado ? 'Configuración en el .env del backend:' : 'Si más adelante la clínica activa la API de WhatsApp Business, se configura en el .env del backend:'}</p>
           <pre className="mt-2 overflow-x-auto rounded-xl bg-white p-3 text-xs">{`WHATSAPP_MODO=meta_cloud
 WHATSAPP_API_TOKEN=…
 WHATSAPP_PHONE_ID=…

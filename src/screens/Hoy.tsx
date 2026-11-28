@@ -18,11 +18,15 @@ import {
   riesgoAlto,
   semaforo,
   tocaHoy,
+  perdido,
+  tresCambiosFecha,
+  tocaAbono,
+  esInternacional,
   type Semaforo,
 } from '../lib/reglas';
 import { Cifra, Etiqueta, Iniciales, Insignias, Meta, Punto, ComoSePrioriza, SEMAFORO_TXT, Vacio, btnBorde, btnNegro } from '../components/ui';
 
-type Filtro = 'todos' | Semaforo | 'vip' | 'riesgo' | 'sincel';
+type Filtro = 'todos' | Semaforo | 'vip' | 'riesgo' | 'sincel' | 'perdidos' | 'cambios' | 'abonos' | 'internacionales';
 type Orden = 'prioridad' | 'valor' | 'antiguedad';
 const POR_PAGINA = 25;
 const COLORES: Semaforo[] = ['rojo', 'amarillo', 'verde'];
@@ -61,13 +65,22 @@ export function Hoy({
   const enJuego = delDia.reduce((s, p) => s + p.valor, 0);
   const total = delDia.length + hechosHoy.length;
   const n = (f: (p: Paciente) => boolean) => delDia.filter(f).length;
+  const EXTRA = {
+    vip: esVIP,
+    riesgo: riesgoAlto,
+    sincel: (p: Paciente) => !p.telefono,
+    perdidos: (p: Paciente) => perdido(p, hoy),
+    cambios: tresCambiosFecha,
+    abonos: (p: Paciente) => tocaAbono(p, hoy),
+    internacionales: esInternacional,
+  };
 
   const q = buscar.trim().toLowerCase();
   const visibles = delDia
     .filter((p) => {
       const ok =
         filtro === 'todos' ||
-        (filtro === 'vip' ? esVIP(p) : filtro === 'riesgo' ? riesgoAlto(p) : filtro === 'sincel' ? !p.telefono : semaforo(p, hoy) === filtro);
+        (EXTRA[filtro as keyof typeof EXTRA]?.(p) ?? semaforo(p, hoy) === filtro);
       return ok && (!q || p.nombre.toLowerCase().includes(q) || p.idPaciente.includes(q) || p.tratamiento.toLowerCase().includes(q));
     })
     .sort((a, b) => (orden === 'valor' ? b.valor - a.valor : orden === 'antiguedad' ? diasEntre(b.fechaEvento, hoy) - diasEntre(a.fechaEvento, hoy) : 0));
@@ -192,6 +205,10 @@ export function Hoy({
                   ['vip', 'VIP', n(esVIP)],
                   ['riesgo', 'Riesgo alto', n(riesgoAlto)],
                   ['sincel', 'Sin celular', n((p) => !p.telefono)],
+                  ['perdidos', 'Perdidos +60 d', n(EXTRA.perdidos)],
+                  ['cambios', '3+ cambios de fecha', n(tresCambiosFecha)],
+                  ['abonos', 'Abonos (día 3 y 7)', n(EXTRA.abonos)],
+                  ['internacionales', 'Internacionales', n(esInternacional)],
                 ] as [Filtro, string, number][]
               )
                 .filter(([id, , c]) => id === 'todos' || c > 0)
@@ -297,7 +314,7 @@ function Fila({ p, hoy, primero, onContactar, onAbrir }: { p: Paciente; hoy: str
           <button onClick={onAbrir} className="mr-1 truncate text-left text-[15px] font-semibold hover:underline">
             {p.nombre}
           </button>
-          <Insignias p={p} />
+          <Insignias p={p} hoy={hoy} />
         </div>
         <p className="mt-0.5 text-sm text-ink/75">
           <b className="font-medium text-ink">{CASO_TXT[p.caso]}</b>

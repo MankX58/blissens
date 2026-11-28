@@ -89,7 +89,7 @@ function Barra({ items, pantalla, onIr, usuario, hoy, enviando, onAjustes, onCer
           <Sonrisa />
           <span className="text-left leading-none">
             <span className="wordmark block text-[15px]">BLISSENS</span>
-            <span className="mt-1.5 block text-[11.5px] text-white/60">Recuperación de pacientes</span>
+            <span className="mt-1.5 block text-[11.5px] text-white/60">Tu futura sonrisa</span>
           </span>
         </button>
         {onCerrar && (
@@ -236,6 +236,8 @@ export function Ajustes({
   onFecha,
   onAsesora,
   onRestaurar,
+  demo,
+  onDemo,
 }: {
   abierto: boolean;
   onCerrar: () => void;
@@ -247,6 +249,8 @@ export function Ajustes({
   onFecha: (f: string) => void;
   onAsesora: (a: string) => void;
   onRestaurar?: () => void; // solo recepción relee los Excel
+  demo: boolean;
+  onDemo: (v: boolean) => void;
 }) {
   return (
     <Modal abierto={abierto} onCerrar={onCerrar} titulo="Ajustes" ancho="max-w-md">
@@ -270,9 +274,17 @@ export function Ajustes({
           <input value={asesora} onChange={(e) => onAsesora(e.target.value)} className="field mt-2" />
         </label>
 
+        <label className="flex cursor-pointer items-start gap-3 rounded-2xl bg-soft p-4">
+          <input type="checkbox" checked={demo} onChange={(e) => onDemo(e.target.checked)} className="mt-0.5 size-4 accent-ink" />
+          <span>
+            <span className="block text-sm font-semibold">Modo anonimizado (sustentación pública)</span>
+            <span className="mt-0.5 block text-xs text-muted">Muestra «Paciente 001…» y oculta celulares, correos, apoderados, notas y comentarios clínicos, también en las descargas.</span>
+          </span>
+        </label>
+
         <p className="text-sm">
           <span className={`mr-2 inline-block size-2 rounded-full ${whatsapp ? 'bg-verde' : 'bg-ink/30'}`} aria-hidden />
-          WhatsApp: <b className="font-semibold">{whatsapp ? 'API conectada' : 'modo simulación'}</b>
+          WhatsApp: <b className="font-semibold">{whatsapp ? 'API conectada' : 'WhatsApp Web (envío asistido)'}</b>
           <span className="block pl-4 text-xs text-muted">Se configura en Campañas.</span>
         </p>
 

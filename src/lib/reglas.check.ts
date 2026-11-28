@@ -1,7 +1,7 @@
 // Comprobación rápida: npx tsx src/lib/reglas.check.ts
 import assert from 'node:assert/strict';
 import type { Campana, Paciente } from '../types';
-import { diasDeRetraso, nivelRiesgo, fechaQueToca, normalizarCelular, nuevoCiclo, pasoActual, registrarContacto, semaforo, soloDigitos, sumarDias, tocaHoy } from './reglas';
+import { diasDeRetraso, nivelRiesgo, fechaQueToca, normalizarCelular, nuevoCiclo, pasoActual, registrarContacto, semaforo, soloDigitos, sumarDias, tocaHoy, motivoNoContactar, perdido, quiereAdelantar, enHorarioClinica } from './reglas';
 import { leerFecha } from './excel';
 import { siguientePaso } from './campanas';
 import { rellenar, recomendados } from './guiones';
@@ -21,11 +21,12 @@ assert.equal(fechaQueToca(hace(2), hoy), sumarDias(hoy, -2)); // el día 3 se at
 assert.ok(tocaHoy(hace(0), hoy));
 assert.equal(semaforo(hace(2), hoy), 'rojo');
 assert.equal(pasoActual(hace(9), hoy), 7);
-assert.equal(semaforo(hace(9), hoy), 'amarillo');
+assert.equal(semaforo(hace(9), hoy), 'rojo'); // canceló y no ha reagendado: sigue en rojo (pedido de la clínica)
+assert.equal(semaforo(hace(9, { caso: 'pausa' }), hoy), 'amarillo');
 assert.equal(pasoActual(hace(40), hoy), 15);
-assert.equal(semaforo(hace(40), hoy), 'verde'); // rescate
+assert.equal(semaforo(hace(40, { caso: 'pausa' }), hoy), 'verde'); // rescate
 assert.equal(semaforo(hace(40, { fallosSeguidos: 3 }), hoy), 'rojo'); // riesgo alto manda
-assert.equal(semaforo(hace(40, { fallosHistoricos: 6, fallosSeguidos: 0 }), hoy), 'verde'); // falló antes pero volvió: no es riesgo alto
+assert.equal(semaforo(hace(40, { caso: 'pausa', fallosHistoricos: 6, fallosSeguidos: 0 }), hoy), 'verde'); // falló antes pero volvió: no es riesgo alto
 assert.equal(nivelRiesgo(3, 3), 'Alto');
 assert.equal(nivelRiesgo(0, 5), 'Medio'); // reprograma mucho pero sí viene
 assert.equal(nivelRiesgo(1, 1), 'Medio');
@@ -68,8 +69,10 @@ assert.equal(
   rellenar('con la Dra. Sara López o con el Dr. Juan Manuel Olarte', { ...base, especialista: 'Dr. Juan Manuel Olarte' }, { asesora: 'x' }),
   'con la Dra. Sara López o con el Dr. Juan Manuel Olarte' // nombra a los dos: no se toca
 );
-assert.deepEqual(recomendados(hace(2), hoy), [7]); // cancelación día 3 → cat. 03
-assert.deepEqual(recomendados(hace(2, { especialista: 'Dr. Juan Manuel Olarte' }), hoy), [7, 9]);
+assert.deepEqual(recomendados(hace(2), hoy), [101]); // canceló el paciente: reagendar sin culparlo
+assert.deepEqual(recomendados(hace(2, { ultimaCita: { fecha: hoy, estado: 'Anulado', tipo: 'Tratamiento' } }), hoy), [7, 101]); // la anuló la clínica: disculpa
+assert.equal(recomendados(hace(2, { segmento: 'internacional' }), hoy)[0], 201); // internacional: inglés primero
+assert.deepEqual(recomendados(hace(2, { especialista: 'Dr. Juan Manuel Olarte' }), hoy), [101, 9]);
 assert.deepEqual(recomendados(hace(30, { caso: 'limpieza' }), hoy), [10, 12, 17]);
 assert.equal(recomendados(hace(9, { etiquetas: ['Convenio FLAIRES'] }), hoy)[0], 18);
 
@@ -89,3 +92,13 @@ assert.deepEqual(siguientePaso({ ...camp, estado: 'enviando' }, t0 + 5_000), { t
 assert.deepEqual(siguientePaso({ ...camp, estado: 'pausada' }, t0 + 99_000), { tipo: 'nada' });
 assert.deepEqual(siguientePaso({ ...camp, estado: 'enviando', envios: [camp.envios[0]] }, t0), { tipo: 'completar' });
 console.log('ok');
+
+// lo que pidió la clínica: no contactar bloquea, perdido a los 60 días, marca de adelantar por nota o por campo del backend
+assert.equal(pasoActual(hace(2, { estado: 'descartado', notas: [{ fecha: hoy, texto: 'No contactar: Queja activa.' }] }), hoy), null);
+assert.equal(motivoNoContactar(hace(2, { estado: 'descartado', notas: [{ fecha: hoy, texto: 'No contactar: Queja activa.' }] })), 'Queja activa');
+assert.equal(pasoActual(hace(2, { noContactar: true, motivoNoContactar: 'fallecido' }), hoy), null);
+assert.ok(perdido(hace(61), hoy) && !perdido(hace(60), hoy));
+assert.ok(quiereAdelantar(hace(2, { notas: [{ fecha: hoy, texto: 'Quiere adelantar su cita.' }] })));
+assert.ok(!quiereAdelantar(hace(2, { notas: [{ fecha: hoy, texto: 'Quiere adelantar su cita.' }, { fecha: hoy, texto: 'Ya no quiere adelantar su cita.' }] })));
+assert.ok(enHorarioClinica(new Date(2026, 10, 23, 9)) && !enHorarioClinica(new Date(2026, 10, 22, 9)) && !enHorarioClinica(new Date(2026, 10, 23, 17)));
+console.log('reglas nuevas ok');

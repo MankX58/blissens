@@ -3,12 +3,13 @@ export type Caso = 'cancelo' | 'no_asistio' | 'diagnostico' | 'pausa' | 'limpiez
 export type Segmento = 'local' | 'internacional' | 'deportista';
 // activo = tiene cita confirmada (segmento 4 del SRS): no entra a la bandeja
 export type Estado = 'pendiente' | 'recuperado' | 'descartado' | 'agotado' | 'activo';
-export type Resultado = 'agendo' | 'sin_respuesta' | 'lo_pensara' | 'no_interesa';
+export type Resultado = 'agendo' | 'sin_respuesta' | 'lo_pensara' | 'no_interesa' | 'sin_whatsapp';
 export type Motivo = 'costos' | 'agenda' | 'viaje' | 'miedo' | 'salud' | 'otro' | 'sin_dato';
 export type Grupo = 1 | 2 | 3 | 4; // segmentos del SRS
 export type Antiguedad = 'Nuevo' | 'Antiguo';
 export type NivelRiesgo = 'Bajo' | 'Medio' | 'Alto';
-export type Profesional = 'Dra. Sara López' | 'Dr. Juan Manuel Olarte';
+export type Profesional = 'Dra. Sara López' | 'Dr. Juan Manuel Olarte' | 'Dr. Juan Esteban';
+export type MotivoNoContactar = 'tratamiento_terminado' | 'queja_activa' | 'deuda_en_cobro' | 'fallecido' | 'no_le_interesa';
 
 // Una cita real de la agenda exportada del software
 export interface Cita {
@@ -77,6 +78,22 @@ export interface Paciente {
   ciclos: Ciclo[];
   origen: 'excel' | 'manual';
   creadoEl: string;
+  // Campos nuevos del backend (contrato acordado). Opcionales: si el backend aún no los manda, el panel usa sus reglas locales.
+  tipoPaciente?: string; // columna «Tipo Paciente» del software (Deportista, Internacional…)
+  perdido60?: boolean; // es_perdido_60d
+  cambiosFecha?: number; // cambios_fecha_historicos
+  tresCambiosFecha?: boolean; // marca_3_cambios_fecha
+  saldoPendiente?: number; // saldo_pendiente_cop
+  noContactar?: boolean;
+  motivoNoContactar?: MotivoNoContactar;
+  quiereAdelantarCita?: boolean;
+  consentimientoWhatsapp?: boolean | null; // null = aún no se le ha preguntado
+  enChatWhatsapp?: boolean;
+  pendienteDepuracion?: boolean; // «Confirmado» en el pasado: no vino, falta depurar en el software
+  idioma?: 'es' | 'en';
+  pasoAbono?: 3 | 7 | null; // paso_abono_actual
+  tocaAbonoHoy?: boolean;
+  agendadoPor?: string; // usuario que agendó en el software (casi siempre el Dr. Olarte en recepción)
 }
 
 export interface Hueco {
@@ -93,6 +110,8 @@ export interface Hueco {
   ofertas: { pacienteId: string; fecha: string; rechazo?: boolean }[]; // a quién se le ofreció y si dijo que no
   confirmadoEl?: string; // confirmación 24 h antes
   asistencia?: 'asistio' | 'no_asistio';
+  tipoCupo?: 'valoracion_45' | 'control';
+  ventanaAnticipacion?: 'mas_24h' | 'mismo_dia';
 }
 
 export type EstadoEnvio = 'pendiente' | 'enviado' | 'respondio' | 'fallo' | 'omitido';

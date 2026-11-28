@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { ArrowLeft, CalendarCheck, ChevronDown, ChevronRight, Flag, Megaphone, MessageCircle, MessagesSquare, Plus, RotateCcw, Search, SlidersHorizontal, StickyNote, UserMinus, X } from 'lucide-react';
-import type { Antiguedad, Caso, Datos, Estado, Grupo, Paciente, Profesional, Segmento } from '../types';
+import type { Antiguedad, Caso, Datos, Estado, Grupo, MotivoNoContactar, Paciente, Profesional, Segmento } from '../types';
+import { TEXTO_AUTORIZACION, rellenar } from '../lib/guiones';
 import { lineaDeTiempo, type TipoEvento } from '../lib/expediente';
 import {
   CASO_TXT,
@@ -22,6 +23,14 @@ import {
   pesos,
   pesosCorto,
   ultimoContacto,
+  ADELANTAR,
+  AUTORIZA,
+  NO_ADELANTAR,
+  NO_AUTORIZA,
+  NO_CONTACTAR,
+  NO_CONTACTAR_TXT,
+  consentimiento,
+  quiereAdelantar,
 } from '../lib/reglas';
 import { Encabezado, EtiquetaEstado, Iniciales, Insignias, Meta, Modal, Punto, ComoSePrioriza, SEMAFORO_TXT, btnBorde, btnChico, btnNegro, textoRiesgo } from '../components/ui';
 
@@ -47,7 +56,7 @@ export function Pacientes({
   onContactar: (p: Paciente) => void;
   onNota: (id: string, texto: string) => void;
   onReactivar: (id: string) => void;
-  onDescartar: (id: string) => void;
+  onDescartar: (id: string, motivo: MotivoNoContactar) => void;
   onCrear: (p: Paciente) => void;
   soloLectura?: boolean; // especialista: ve y deja notas; contactar y cambiar el seguimiento es de recepción
 }) {
@@ -316,7 +325,7 @@ function Lista({ pacientes, hoy, onAbrir, onCrear, soloLectura }: { pacientes: P
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-center gap-1.5">
                       <span className="truncate text-[15px] font-semibold">{p.nombre}</span>
-                      <Insignias p={p} />
+                      <Insignias p={p} hoy={hoy} />
                     </span>
                     <Meta p={p} className="block truncate" />
                   </span>
@@ -403,10 +412,13 @@ function Expediente({
   onContactar: (p: Paciente) => void;
   onNota: (id: string, texto: string) => void;
   onReactivar: (id: string) => void;
-  onDescartar: (id: string) => void;
+  onDescartar: (id: string, motivo: MotivoNoContactar) => void;
   soloLectura: boolean;
 }) {
   const [nota, setNota] = useState('');
+  const [sacando, setSacando] = useState(false);
+  const autoriza = consentimiento(p);
+  const marcar = (t: string) => onNota(p.id, t);
   const eventos = lineaDeTiempo(p, datos.huecos, datos.campanas, datos.citas);
   const paso = pasoActual(p, hoy);
   const color = semaforo(p, hoy);
@@ -431,7 +443,7 @@ function Expediente({
             <div className="min-w-0">
               <div className="flex flex-wrap gap-1.5">
                 <EtiquetaEstado estado={p.estado} />
-                <Insignias p={p} detalle />
+                <Insignias p={p} detalle hoy={hoy} />
               </div>
               <h1 className="mt-1.5 text-2xl font-bold tracking-tight sm:text-3xl">{p.nombre}</h1>
               <p className="mt-0.5 truncate text-sm text-muted">
@@ -560,6 +572,7 @@ function Expediente({
           )}
           <Grupo titulo="Atención">
             <Fila k="Especialista" v={p.especialista} />
+            {p.agendadoPor && p.agendadoPor !== p.especialista && <Fila k="Agendado por" v={`${p.agendadoPor} (usuario de recepción)`} />}
             {p.ultimaCita && <Fila k="Última cita" v={`${fechaCorta(p.ultimaCita.fecha)} · ${p.ultimaCita.estado}`} />}
             <Fila k="Última vez que asistió" v={p.ultimaAtendida ? fechaCorta(p.ultimaAtendida) : 'Nunca'} />
             <Fila k="Motivo registrado" v={MOTIVO_TXT[p.motivo]} />
@@ -580,11 +593,50 @@ function Expediente({
             <p className="mt-3 text-xs text-muted">{textoRiesgo(p)}.</p>
             <ComoSePrioriza className="mt-2" />
           </details>
+          {!soloLectura && (
+            <Grupo titulo="WhatsApp y agenda">
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input type="checkbox" checked={quiereAdelantar(p)} onChange={(e) => marcar(e.target.checked ? `${ADELANTAR}.` : `${NO_ADELANTAR}.`)} className="size-4 accent-ink" />
+                Quiere adelantar su cita
+              </label>
+              <p className="mt-2 text-sm">
+                Autorización WhatsApp:{' '}
+                <b className="font-semibold">{autoriza === null ? 'sin preguntar' : autoriza ? 'sí' : 'no'}</b>
+              </p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <button onClick={() => marcar(`${AUTORIZA} (Ley 1581 de 2012).`)} className={`${btnChico} bg-soft`}>Autorizó</button>
+                <button onClick={() => marcar(`${NO_AUTORIZA}.`)} className={`${btnChico} bg-soft`}>No autorizó</button>
+                <button onClick={() => navigator.clipboard?.writeText(rellenar(TEXTO_AUTORIZACION, p, { asesora: '' })).catch(() => undefined)} className={`${btnChico} text-ink/70 underline`}>
+                  Copiar formato
+                </button>
+              </div>
+            </Grupo>
+          )}
           {p.estado === 'pendiente' && !soloLectura && (
-            <button onClick={() => onDescartar(p.id)} className="mt-5 inline-flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-rojo">
-              <UserMinus className="size-3.5" aria-hidden /> Sacar del seguimiento
+            <button onClick={() => setSacando(true)} className="mt-5 inline-flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-rojo">
+              <UserMinus className="size-3.5" aria-hidden /> No volver a contactar…
             </button>
           )}
+          <Modal abierto={sacando} onCerrar={() => setSacando(false)} titulo="No volver a contactar" ancho="max-w-md">
+            <div className="p-6 sm:p-8">
+              <h2 className="text-xl font-bold">No volver a contactar a {p.nombre.split(' ')[0]}</h2>
+              <p className="mt-1 text-sm text-muted">Sale del seguimiento y de las campañas. Elija el motivo:</p>
+              <div className="mt-4 grid gap-2">
+                {NO_CONTACTAR.map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => {
+                      setSacando(false);
+                      onDescartar(p.id, m);
+                    }}
+                    className="rounded-2xl border border-line px-4 py-2.5 text-left text-sm font-semibold hover:border-ink/40"
+                  >
+                    {NO_CONTACTAR_TXT[m]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </Modal>
         </aside>
       </div>
     </div>
@@ -652,6 +704,7 @@ function NuevoPaciente({ abierto, hoy, onCerrar, onCrear }: { abierto: boolean; 
         className="p-6 sm:p-8"
         onSubmit={(e) => {
           e.preventDefault();
+          if (!normalizarCelular(f.telefono)) return;
           const id = Date.now();
           onCrear({
             id: `m-${id}`,
@@ -690,7 +743,8 @@ function NuevoPaciente({ abierto, hoy, onCerrar, onCrear }: { abierto: boolean; 
             <input required value={f.nombre} onChange={set('nombre')} className="field" />
           </L>
           <L t="Celular">
-            <input required value={f.telefono} onChange={set('telefono')} className="field" placeholder="+57 300 000 0000" />
+            <input required value={f.telefono} onChange={set('telefono')} className="field" placeholder="+57 300 000 0000" aria-invalid={!!f.telefono && !normalizarCelular(f.telefono)} />
+            {f.telefono && !normalizarCelular(f.telefono) && <span className="mt-1 block text-xs text-rojo">Celular no válido: 10 dígitos que empiecen por 3, o con indicativo.</span>}
           </L>
           <L t="Caso">
             <select value={f.caso} onChange={set('caso')} className="field">

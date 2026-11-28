@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs';
 import { leerArchivos, radiografia } from './excel';
 import { AUDIENCIAS, personalizar } from './campanas';
 
-const dir = 'public/datos/';
-const nombres = ['agenda-citas-estados.xlsx', 'agenda-citas-detalle.xlsx', 'arancel-precios.xlsx', 'guiones.xlsx'];
+// los Excel reales viven fuera del repo (datos de pacientes): por defecto, la carpeta hermana de la clínica
+const dir = (process.env.RUTA_EXCEL ?? '../Archivos Blissens Odontologia') + '/';
+const nombres = ['Agenda citas y estados .xlsx', 'Agenda y citas .xlsx', 'Arancel precios.xlsx', 'Guiones_Blissens_.xlsx'];
 const files = nombres.map((n) => {
   const b = readFileSync(dir + n);
   return { nombre: n, buffer: b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer };

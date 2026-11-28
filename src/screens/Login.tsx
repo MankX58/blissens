@@ -52,7 +52,7 @@ export function Login() {
           <Sonrisa size={44} className="mx-auto" />
           <p className="wordmark mt-5 text-sm">BLISSENS</p>
           <h1 className="mt-6 text-2xl font-bold tracking-tight">Entrar al panel</h1>
-          <p className="mt-1 text-sm text-white/55">Recuperación de pacientes</p>
+          <p className="mt-1 text-sm text-white/55">Recuperación de pacientes · «Tu futura sonrisa»</p>
         </div>
 
         <div className="mt-8 rounded-[28px] bg-white p-6 text-ink shadow-2xl">

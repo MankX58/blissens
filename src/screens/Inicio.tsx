@@ -19,8 +19,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { Datos, Motivo, Paciente, Pantalla, Profesional, Resultado } from '../types';
-import { CASO_TXT, ESPECIALISTAS, GRUPO_TXT, MOTIVO_TXT, RESULTADO_TXT, SEMAFORO_INFO, esVIP, diasEntre, fechaCorta, pesosCorto, riesgoAlto, semaforo, sumarDias, tocaHoy } from '../lib/reglas';
-import { AUDIENCIAS } from '../lib/campanas';
+import { CASO_TXT, ESPECIALISTAS, GRUPO_TXT, MOTIVO_TXT, RESULTADO_TXT, SEMAFORO_INFO, esVIP, diasEntre, fechaCorta, pesosCorto, riesgoAlto, semaforo, sumarDias, tocaHoy, ocupacion, META_OCUPACION, tocaAbono } from '../lib/reglas';
 import { ROLES, type Rol } from '../lib/roles';
 import { AGENDA_VIEJA_H, estadoDe, haceTexto, horasDesdeCarga } from './Agenda';
 import { Cifra, Iniciales, Insignias, SEMAFORO_TXT, Vacio, btnNegro } from '../components/ui';
@@ -411,11 +410,12 @@ const RESUMEN: Record<Rol, (d: Datos, hoy: string) => Resumen> = {
     const res = contar(Object.keys(RESULTADO_TXT) as Resultado[], semana.map((c) => c.resultado));
     const porConfirmar = n('confirmar') + n('asistencia');
     // campañas: siguen al 3-7-15 (quien no respondió) y los envía la misma persona por WhatsApp
-    const agotados = pacientes.filter(AUDIENCIAS.find((a) => a.id === 'agotado')!.filtro).filter((p) => p.telefono);
+    const agotados = pacientes.filter((p) => p.estado === 'agotado' && p.telefono);
+    const abonos = pacientes.filter((p) => tocaAbono(p, hoy)).length;
     const enCurso = d.campanas.filter((c) => c.estado === 'enviando' || c.estado === 'programada' || c.estado === 'pausada');
     return {
       foco: urgentes
-        ? { texto: `empieza por los ${urgentes} urgentes: cancelaron o faltaron hace 3 días o menos, o son de alto riesgo.`, accion: 'Ir a la lista del día', ir: 'hoy' }
+        ? { texto: `empieza por los ${urgentes} urgentes: cancelaron o faltaron y no han reagendado, son VIP o de alto riesgo.`, accion: 'Ir a la lista del día', ir: 'hoy' }
         : porConfirmar
           ? { texto: `confirma ${n('confirmar')} citas de mañana y registra ${n('asistencia')} asistencias.`, accion: 'Abrir agenda libre', ir: 'agenda' }
           : delDia.length
@@ -427,6 +427,7 @@ const RESUMEN: Record<Rol, (d: Datos, hoy: string) => Resumen> = {
         { titulo: 'Seguimiento 3-7-15', icono: Sparkles, valor: delDia.length, unidad: 'por contactar hoy', detalle: urgentes ? `${urgentes} urgentes: recientes, VIP o riesgo alto` : 'Sin urgentes', tono: urgentes ? 'urgente' : delDia.length ? 'atencion' : 'ok', avance: [hechos, hechos + delDia.length], desglose: colores, accion: 'Contactar', ir: 'hoy' },
         { titulo: 'Confirmar y registrar', icono: CalendarCheck, valor: porConfirmar, unidad: 'citas de cupos', detalle: `${n('confirmar')} por confirmar 24 h antes · ${n('asistencia')} por registrar asistencia`, tono: porConfirmar ? 'urgente' : 'ok', accion: 'Abrir agenda', ir: 'agenda' },
         { titulo: 'Cupos libres', icono: CalendarClock, valor: n('libre'), unidad: 'por llenar', detalle: `${n('ofrecido')} esperando respuesta del paciente`, tono: n('libre') ? 'atencion' : 'ok', avance: [futuros.filter((h) => h.ocupadoPor).length, futuros.length], accion: 'Llenar cupos', ir: 'agenda' },
+        { titulo: 'Acompañamiento de abonos', icono: Megaphone, valor: abonos, unidad: 'valorados en día 3 o 7', detalle: 'Recordatorio amable para iniciar el plan (no es cobro)', tono: abonos ? 'atencion' : 'ok', accion: 'Crear campaña', ir: 'campanas' },
         { titulo: 'Campañas de reactivación', icono: Megaphone, valor: agotados.length, unidad: 'sin respuesta tras 3-7-15', detalle: enCurso.length ? `${enCurso.length} ${enCurso.length === 1 ? 'campaña' : 'campañas'} en curso` : 'Ninguna campaña en curso', tono: agotados.length ? 'atencion' : 'ok', accion: agotados.length ? 'Crear campaña' : 'Ver campañas', ir: 'campanas' },
         { titulo: 'Datos de contacto', icono: PhoneOff, valor: sinCel, unidad: 'sin celular válido', detalle: 'Complétalo o usa correo / apoderado', tono: sinCel ? 'atencion' : 'ok', accion: 'Ver pacientes', ir: 'pacientes' },
         { titulo: 'Agenda del software', icono: FileSpreadsheet, unidad: `Cargada ${haceTexto(horasDesdeCarga(d.ultimaCarga))}`, detalle: horasDesdeCarga(d.ultimaCarga) > AGENDA_VIEJA_H ? 'Carga el Excel de hoy: así la agenda libre no ofrece horarios que ya se ocuparon' : 'Al día. Lo trabajado se conserva al recargar', tono: horasDesdeCarga(d.ultimaCarga) > AGENDA_VIEJA_H ? 'atencion' : 'ok', accion: 'Cargar Excel nuevo', ir: 'cargar' },
@@ -504,6 +505,8 @@ const RESUMEN: Record<Rol, (d: Datos, hoy: string) => Resumen> = {
     const enviados = campanas.flatMap((c) => c.envios).filter((e) => e.estado === 'enviado' || e.estado === 'respondio');
     const resp = enviados.filter((e) => e.estado === 'respondio').length;
     const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
+    const oc = ocupacion(citas, huecos, hoy);
+    const flojos = oc.porDia.filter((x) => x.hay && x.v < META_OCUPACION && (x.k === 'Lunes' || x.k === 'Miércoles'));
     const porDoctor = ESPECIALISTAS.map((e) => ({ k: e, v: suma(porRecuperar.filter((p) => p.especialista === e)) })).sort((a, b) => b.v - a.v);
     return {
       foco: {
@@ -520,6 +523,7 @@ const RESUMEN: Record<Rol, (d: Datos, hoy: string) => Resumen> = {
         { k: 'Dinero detenido', v: detenido, formato: pesosCorto, sub: 'según el arancel' },
         { k: 'Recuperados', v: rec.length, sub: `${pesosCorto(suma(rec))} retomados` },
         { k: 'Tasa de recuperación', v: pct(rec.length, cerrados), formato: (n) => `${Math.round(n)} %`, sub: `de ${cerrados} casos cerrados` },
+        { k: 'Ocupación (14 días)', v: oc.pct, formato: (n) => `${Math.round(n)} %`, sub: oc.hay ? `meta ${META_OCUPACION} % · ${oc.pct >= META_OCUPACION ? 'cumplida' : `faltan ${META_OCUPACION - oc.pct} pts`}` : 'sin agenda cargada' },
       ],
       resps: [
         { titulo: 'Seguimiento diario', icono: Sparkles, valor: delDia.length, unidad: 'por contactar hoy', detalle: `${hechos} ya contactados${urgentes ? ` · ${urgentes} urgentes` : ''}`, tono: urgentes ? 'urgente' : delDia.length ? 'atencion' : 'ok', avance: [hechos, hechos + delDia.length], desglose: porColor(delDia, hoy), accion: 'Ver la lista del día', ir: 'hoy' },
@@ -529,6 +533,18 @@ const RESUMEN: Record<Rol, (d: Datos, hoy: string) => Resumen> = {
         { titulo: 'Equipo y accesos', icono: UserCog, unidad: 'Cuentas y roles', detalle: 'Crea cuentas y define qué ve cada persona', tono: 'ok', accion: 'Gestionar cuentas', ir: 'cuentas' },
       ],
       lecturas: [
+        {
+          titulo: 'Ocupación por día (meta 85 %)',
+          vacia: !oc.hay,
+          texto: flojos.length ? (
+            <>
+              <b>{flojos.map((x) => x.k).join(' y ')}</b> {flojos.length > 1 ? 'están' : 'está'} por debajo de la meta: ofrezca ahí los cupos a quien quiere adelantar su cita.
+            </>
+          ) : (
+            <>Lunes y miércoles suelen ser los más difíciles de llenar; hoy van en la meta o por encima.</>
+          ),
+          barras: oc.porDia.filter((x) => x.hay).map((x) => ({ k: x.k, v: x.v, txt: `${x.v} %` })),
+        },
         {
           titulo: 'Dinero detenido por especialista',
           texto: (
