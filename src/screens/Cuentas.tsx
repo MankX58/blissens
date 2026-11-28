@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { CalendarClock, Check, Coffee, Eye, EyeOff, Palmtree, Pencil, Plus, Trash2, UserPlus } from 'lucide-react';
+import { CalendarClock, CalendarDays, Check, ChevronDown, Coffee, Eye, EyeOff, Lock, Palmtree, Pencil, Plus, Stethoscope, Trash2, UserPlus, Users, UserX } from 'lucide-react';
 import type { Ausencia, Equipo, Franja, Pausa, Profesional } from '../types';
 import { api } from '../lib/api';
 import { authClient, esRol } from '../lib/auth';
-import { ESPECIALISTAS, fechaCorta } from '../lib/reglas';
+import { ESPECIALISTAS, fechaCorta, sumarDias } from '../lib/reglas';
 import { ROLES, type Rol } from '../lib/roles';
 import { Encabezado, Iniciales, Modal, btnBorde, btnChico, btnNegro } from '../components/ui';
 
@@ -51,6 +51,11 @@ export function resumenHorario(franjas: Franja[]) {
 
 type Dialogo = { tipo: 'editar' | 'vacaciones' | 'horario'; c: Cuenta } | { tipo: 'nueva' } | null;
 
+const diaSemana = (f: string) => (new Date(`${f}T12:00:00`).getDay() + 6) % 7; // 0 = lunes
+const cubre = (a: Ausencia, f: string) => a.desde <= f && f <= a.hasta;
+const minutos = (h: string) => +h.slice(0, 2) * 60 + +h.slice(3, 5);
+const ORDEN_ROLES: Rol[] = ['direccion', 'auxiliar', 'especialista'];
+
 // onEquipo: horarios, descansos o vacaciones cambiaron; el panel se recarga para recalcular la agenda libre
 export function Cuentas({ yo, hoy, onAviso, onEquipo }: { yo: string; hoy: string; onAviso: (t: string) => void; onEquipo: () => void }) {
   const [cuentas, setCuentas] = useState<Cuenta[] | null>(null);
@@ -86,118 +91,112 @@ export function Cuentas({ yo, hoy, onAviso, onEquipo }: { yo: string; hoy: strin
     cargar();
   };
 
-  const ausenciasDe = (id: string) => (equipo?.ausencias ?? []).filter((a) => a.userId === id && a.hasta >= hoy);
+  const ausencias = equipo?.ausencias ?? [];
+  const lista = cuentas ?? [];
+  const activas = lista.filter((c) => !c.banned);
+  const ausentesHoy = activas.filter((c) => ausencias.some((a) => a.userId === c.id && cubre(a, hoy)));
+  const proximas = ausencias.filter((a) => a.desde > hoy && a.desde <= sumarDias(hoy, 30));
+  const atiendenHoy = ESPECIALISTAS.filter(
+    (p) =>
+      equipo?.horarios[p]?.some((f) => f.dia === diaSemana(hoy)) &&
+      !lista.some((c) => c.profesional === p && ausencias.some((a) => a.userId === c.id && cubre(a, hoy)))
+  );
 
   return (
     <div className="space-y-10">
-      <Encabezado titulo="Equipo" descripcion="Quién entra al panel y qué ve, el horario de cada especialista, los descansos de la clínica y las vacaciones. Con todo esto se calcula la agenda libre.">
+      <Encabezado titulo="Equipo" descripcion="Quién trabaja, cuándo atiende y qué ve cada persona en el panel. Los horarios, descansos y vacaciones de aquí son los que calculan la agenda libre.">
         <button onClick={() => setDialogo({ tipo: 'nueva' })} className={btnNegro}>
           <UserPlus className="size-4" /> Nueva cuenta
         </button>
       </Encabezado>
 
       {error && <p className="rounded-2xl bg-rojo/10 px-4 py-3 text-sm text-rojo">{error}</p>}
-      {!cuentas && !error && <p className="text-sm text-muted">Cargando cuentas…</p>}
+      {!cuentas && !error && <p className="text-sm text-muted">Cargando el equipo…</p>}
 
-      {cuentas && (
-        <ul className="card escalonado divide-y divide-line overflow-hidden">
-          {cuentas.map((c) => {
-            const propia = c.id === yo;
-            const ausente = ausenciasDe(c.id);
-            const ahora = ausente.find((a) => a.desde <= hoy);
-            const horario = c.role === 'especialista' && c.profesional ? equipo?.horarios[c.profesional as Profesional] : undefined;
-            return (
-              <li key={c.id} className={`flex flex-col gap-3 px-5 py-4 xl:flex-row xl:items-center ${c.banned ? 'opacity-55' : ''}`}>
-                <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <Iniciales nombre={c.name || c.email} />
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold">
-                      {c.name} {propia && <span className="text-xs font-normal text-muted">(tú)</span>}
-                    </p>
-                    <p className="truncate text-sm text-muted">{c.email}</p>
-                    <p className="mt-1 flex flex-wrap gap-1.5 text-[11px] font-semibold">
-                      {ahora && <span className="rounded-full bg-amarillo/15 px-2 py-0.5 text-amarillo">{ahora.motivo} hasta el {fechaCorta(ahora.hasta)}</span>}
-                      {ausente
-                        .filter((a) => a !== ahora)
-                        .slice(0, 2)
-                        .map((a) => (
-                          <span key={a.id} className="rounded-full bg-soft px-2 py-0.5 text-ink/70">
-                            {a.motivo}: {rango(a)}
-                          </span>
-                        ))}
-                      {horario && (
-                        <span className={`rounded-full px-2 py-0.5 ${horario.length ? 'bg-soft text-ink/70' : 'bg-amarillo/15 text-amarillo'}`}>
-                          {horario.length ? resumenHorario(horario) : 'Sin horario: no se calcula su agenda libre'}
-                        </span>
-                      )}
-                    </p>
+      {cuentas && equipo && (
+        <>
+          {/* cómo está el equipo hoy, de un vistazo */}
+          <section aria-label="El equipo hoy" className="entrar card grid grid-cols-2 gap-px overflow-hidden bg-line p-0 lg:grid-cols-4">
+            <Dato icono={Users} k="Con acceso al panel" v={activas.length} sub={lista.length - activas.length ? `${lista.length - activas.length} sin acceso` : 'Todas las cuentas activas'} />
+            <Dato icono={Stethoscope} k="Especialistas que atienden hoy" v={atiendenHoy.length} sub={atiendenHoy.length ? atiendenHoy.map((p) => p.split(' ').slice(0, 2).join(' ')).join(' · ') : 'Ninguno según los horarios'} />
+            <Dato
+              icono={Palmtree}
+              k="Ausentes hoy"
+              v={ausentesHoy.length}
+              sub={ausentesHoy.length ? ausentesHoy.map((c) => c.name.split(' ')[0]).join(', ') : 'Todo el equipo disponible'}
+              tono={ausentesHoy.length ? 'amarillo' : undefined}
+            />
+            <Dato icono={CalendarDays} k="Ausencias en 30 días" v={proximas.length} sub={proximas[0] ? `La próxima: ${proximas[0].nombre.split(' ')[0]}, ${rango(proximas[0])}` : 'Sin ausencias programadas'} />
+          </section>
+
+          <Semana
+            hoy={hoy}
+            equipo={equipo}
+            cuentas={lista}
+            onHorario={(c) => setDialogo({ tipo: 'horario', c })}
+          />
+
+          {/* personas, agrupadas por rol */}
+          <section aria-labelledby="t-personas" className="space-y-6">
+            <div>
+              <h2 id="t-personas" className="text-xl font-bold tracking-tight">
+                Personas
+              </h2>
+              <p className="text-sm text-muted">Toca «Editar» para cambiar datos, rol, agenda o contraseña.</p>
+            </div>
+            {[...ORDEN_ROLES, null].map((r) => {
+              const grupo = lista.filter((c) => (r ? c.role === r : !esRol(c.role)));
+              if (!grupo.length) return null;
+              const d = r ? ROLES[r] : null;
+              return (
+                <div key={r ?? 'sin-rol'}>
+                  <h3 className="flex items-center gap-2 text-sm">
+                    <span className="size-2.5 rounded-full" style={{ background: d?.color ?? 'var(--color-line)' }} aria-hidden />
+                    <b className="font-semibold">{d?.nombre ?? 'Sin rol'}</b>
+                    <span className="num rounded-full bg-soft px-1.5 text-xs text-muted">{grupo.length}</span>
+                  </h3>
+                  {d && <p className="mb-3 mt-0.5 pl-[18px] text-xs text-muted">{d.proposito}</p>}
+                  <div className="escalonado grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {grupo.map((c) => (
+                      <Persona
+                        key={c.id}
+                        c={c}
+                        propia={c.id === yo}
+                        hoy={hoy}
+                        ausencias={ausencias.filter((a) => a.userId === c.id && a.hasta >= hoy)}
+                        horario={c.role === 'especialista' && c.profesional ? equipo.horarios[c.profesional as Profesional] : undefined}
+                        onDialogo={(tipo) => setDialogo({ tipo, c })}
+                        onAcceso={() =>
+                          c.banned
+                            ? cambiar(authClient.admin.unbanUser({ userId: c.id }), `${c.name} puede volver a entrar`)
+                            : confirm(`${c.name} no podrá entrar al panel y se cerrarán sus sesiones. ¿Continuar?`) &&
+                              cambiar(authClient.admin.banUser({ userId: c.id }), `${c.name} ya no puede entrar`)
+                        }
+                      />
+                    ))}
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {c.role === 'especialista' && (
-                    <SelectAgenda
-                      etiqueta={`Agenda de ${c.name}`}
-                      valor={c.profesional ?? ''}
-                      onCambio={(p) => cambiar(authClient.admin.updateUser({ userId: c.id, data: { profesional: p } }), `${c.name} ve ahora la agenda de ${p}`)}
-                      className={`w-auto py-1.5 ${c.profesional ? '' : 'border-amarillo'}`}
-                    />
-                  )}
-                  <select
-                    aria-label={`Rol de ${c.name}`}
-                    value={esRol(c.role) ? c.role : ''}
-                    disabled={propia}
-                    onChange={(e) => cambiar(authClient.admin.setRole({ userId: c.id, role: e.target.value as Rol }), `Rol de ${c.name} actualizado`)}
-                    className="field w-auto py-1.5"
-                  >
-                    {!esRol(c.role) && <option value="">Sin rol</option>}
-                    {OPCIONES.map(([r, x]) => (
-                      <option key={r} value={r}>
-                        {x.nombre}
-                      </option>
-                    ))}
-                  </select>
-                  <Boton icono={Pencil} onClick={() => setDialogo({ tipo: 'editar', c })} etiqueta={`Editar datos de ${c.name}`}>
-                    Editar
-                  </Boton>
-                  <Boton icono={Palmtree} onClick={() => setDialogo({ tipo: 'vacaciones', c })} etiqueta={`Vacaciones de ${c.name}`}>
-                    Vacaciones
-                  </Boton>
-                  {c.role === 'especialista' && c.profesional && (
-                    <Boton icono={CalendarClock} onClick={() => setDialogo({ tipo: 'horario', c })} etiqueta={`Horario de ${c.name}`}>
-                      Horario
-                    </Boton>
-                  )}
-                  <button
-                    disabled={propia}
-                    onClick={() =>
-                      c.banned
-                        ? cambiar(authClient.admin.unbanUser({ userId: c.id }), `${c.name} puede volver a entrar`)
-                        : confirm(`${c.name} no podrá entrar al panel y se cerrarán sus sesiones. ¿Continuar?`) &&
-                          cambiar(authClient.admin.banUser({ userId: c.id }), `${c.name} ya no puede entrar`)
-                    }
-                    className={`${btnChico} ${c.banned ? 'bg-ink text-white' : 'text-muted hover:bg-soft hover:text-rojo'} disabled:invisible`}
-                  >
-                    {c.banned ? 'Reactivar' : 'Desactivar'}
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+              );
+            })}
+          </section>
+
+          <Descansos pausas={equipo.pausas} onGuardado={trasCambio} />
+        </>
       )}
 
-      {equipo && <Descansos pausas={equipo.pausas} onGuardado={trasCambio} />}
-
-      <section aria-labelledby="t-roles">
-        <h2 id="t-roles" className="text-lg font-semibold">
-          Qué hace y qué ve cada rol
-        </h2>
-        <p className="text-sm text-muted">Cada persona entra a un inicio con sus responsabilidades. Lo que no es de su rol no aparece.</p>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+      <details className="group card overflow-hidden">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-5 sm:p-6 [&::-webkit-details-marker]:hidden">
+          <span>
+            <span className="block font-semibold">¿Qué hace y qué ve cada rol?</span>
+            <span className="text-sm text-muted">Cada persona entra a un inicio con sus responsabilidades; lo que no es de su rol no aparece.</span>
+          </span>
+          <ChevronDown className="size-5 shrink-0 text-muted transition-transform group-open:rotate-180" aria-hidden />
+        </summary>
+        <div className="grid gap-3 border-t border-line p-5 sm:p-6 md:grid-cols-3">
           {OPCIONES.map(([r]) => {
             const d = ROLES[r];
             return (
-              <article key={r} className="card rounded-[22px] p-5">
+              <article key={r} className="rounded-[22px] bg-soft/60 p-5">
                 <h3 className="flex items-center gap-2 font-semibold">
                   <span className="size-2.5 rounded-full" style={{ background: d.color }} aria-hidden />
                   {d.nombre}
@@ -228,7 +227,7 @@ export function Cuentas({ yo, hoy, onAviso, onEquipo }: { yo: string; hoy: strin
             );
           })}
         </div>
-      </section>
+      </details>
 
       <Modal abierto={dialogo?.tipo === 'nueva'} onCerrar={cerrar} titulo="Nueva cuenta" ancho="max-w-md">
         <NuevaCuenta
@@ -244,10 +243,12 @@ export function Cuentas({ yo, hoy, onAviso, onEquipo }: { yo: string; hoy: strin
           {dialogo.tipo === 'editar' && (
             <EditarCuenta
               c={dialogo.c}
+              propia={dialogo.c.id === yo}
               onGuardada={(t) => {
                 cerrar();
                 onAviso(t);
                 cargar();
+                onEquipo();
               }}
             />
           )}
@@ -275,6 +276,220 @@ export function Cuentas({ yo, hoy, onAviso, onEquipo }: { yo: string; hoy: strin
   );
 }
 
+function Dato({ icono: Icono, k, v, sub, tono }: { icono: typeof Users; k: string; v: number; sub: string; tono?: 'amarillo' }) {
+  return (
+    <div className="bg-white p-4 sm:p-5">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-muted">
+        <Icono className="size-3.5" aria-hidden /> {k}
+      </p>
+      <p className={`num mt-1 text-2xl font-bold tracking-tight sm:text-[28px] ${tono === 'amarillo' && v ? 'text-amarillo' : ''}`}>{v}</p>
+      <p className="mt-0.5 truncate text-xs text-muted" title={sub}>
+        {sub}
+      </p>
+    </div>
+  );
+}
+
+// ---------- esta semana: horario de cada especialista como una línea de tiempo, con vacaciones y almuerzo ----------
+const DESDE_H = 6 * 60;
+const HASTA_H = 20 * 60;
+const pos = (m: number) => `${((Math.min(Math.max(m, DESDE_H), HASTA_H) - DESDE_H) / (HASTA_H - DESDE_H)) * 100}%`;
+
+function Semana({ hoy, equipo, cuentas, onHorario }: { hoy: string; equipo: Equipo; cuentas: Cuenta[]; onHorario: (c: Cuenta) => void }) {
+  const dias = Array.from({ length: 7 }, (_, i) => sumarDias(hoy, i));
+  const pausas = equipo.pausas.map((p) => [minutos(p.inicio), minutos(p.fin)] as const);
+  const otrasAusencias = equipo.ausencias.filter((a) => {
+    const c = cuentas.find((x) => x.id === a.userId);
+    return c && c.role !== 'especialista' && a.desde <= dias[6] && a.hasta >= hoy;
+  });
+  return (
+    <section aria-labelledby="t-semana" className="entrar card overflow-hidden">
+      <div className="flex flex-wrap items-end justify-between gap-2 p-5 pb-3 sm:p-6 sm:pb-3">
+        <div>
+          <h2 id="t-semana" className="text-xl font-bold tracking-tight">
+            Esta semana en la clínica
+          </h2>
+          <p className="text-sm text-muted">Cuándo atiende cada especialista. El almuerzo y las vacaciones ya están descontados.</p>
+        </div>
+        <p className="flex items-center gap-3 text-xs text-muted">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-5 rounded-full bg-ink" aria-hidden /> Atiende
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-5 rounded-full bg-amarillo/40" aria-hidden /> Ausente
+          </span>
+        </p>
+      </div>
+      <div className="overflow-x-auto px-3 pb-4 sm:px-4">
+        <table className="w-full min-w-[600px] table-fixed border-separate border-spacing-1 text-sm">
+          <thead>
+            <tr>
+              <th className="w-36" />
+              {dias.map((d) => {
+                const f = new Date(`${d}T12:00:00`);
+                return (
+                  <th key={d} scope="col" className={`rounded-xl px-1 py-1.5 text-center font-normal ${d === hoy ? 'bg-ink text-white' : 'text-muted'}`}>
+                    <span className="block text-[11px] uppercase tracking-wider">{d === hoy ? 'Hoy' : f.toLocaleDateString('es-CO', { weekday: 'short' }).replace('.', '')}</span>
+                    <span className="num block text-sm font-semibold">{f.getDate()}</span>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {ESPECIALISTAS.map((p) => {
+              const franjas = equipo.horarios[p] ?? [];
+              const personas = cuentas.filter((c) => c.role === 'especialista' && c.profesional === p);
+              const ausencias = equipo.ausencias.filter((a) => personas.some((c) => c.id === a.userId));
+              return (
+                <tr key={p}>
+                  <th scope="row" className="pr-2 text-left align-middle font-normal">
+                    <span className="block font-semibold">{p}</span>
+                    {personas[0] ? (
+                      <button onClick={() => onHorario(personas[0])} className="text-xs text-muted underline-offset-2 hover:text-ink hover:underline">
+                        {franjas.length ? 'Ajustar horario' : 'Definir horario'}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-muted">Sin cuenta asignada</span>
+                    )}
+                  </th>
+                  {dias.map((d) => {
+                    const aus = ausencias.find((a) => cubre(a, d));
+                    const f = franjas.find((x) => x.dia === diaSemana(d));
+                    if (aus)
+                      return (
+                        <td key={d} className="rounded-xl bg-amarillo/15 px-2 py-2.5 text-center text-xs font-semibold text-amarillo" title={`${aus.motivo}: ${rango(aus)}`}>
+                          <Palmtree className="mx-auto mb-0.5 size-4" aria-hidden />
+                          {aus.motivo}
+                        </td>
+                      );
+                    if (!f)
+                      return (
+                        <td key={d} className="rayado rounded-xl px-2 py-2.5 text-center text-xs text-muted">
+                          No atiende
+                        </td>
+                      );
+                    const a = minutos(f.inicio);
+                    const b = minutos(f.fin);
+                    const huecos = pausas.filter(([x, y]) => x < b && y > a);
+                    return (
+                      <td key={d} className={`rounded-xl px-2 py-2.5 ${d === hoy ? 'bg-ink/[.05]' : 'bg-soft/60'}`} title={`${f.inicio}–${f.fin}`}>
+                        <span className="relative block h-2 rounded-full bg-line/70" aria-hidden>
+                          <span className="crecer-x absolute inset-y-0 rounded-full bg-ink" style={{ left: pos(a), right: `calc(100% - ${pos(b)})` }} />
+                          {huecos.map(([x, y]) => (
+                            <span key={x} className="absolute inset-y-[-2px] w-[3px] rounded-full bg-paper" style={{ left: pos(x), width: `calc(${pos(y)} - ${pos(x)})` }} />
+                          ))}
+                        </span>
+                        <span className="num mt-1.5 block text-center text-xs font-medium">
+                          {f.inicio.replace(':00', '')}–{f.fin.replace(':00', '')}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {otrasAusencias.length > 0 && (
+        <p className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-3 text-sm sm:px-6">
+          <span className="text-muted">También fuera esta semana:</span>
+          {otrasAusencias.map((a) => (
+            <span key={a.id} className="rounded-full bg-amarillo/15 px-2.5 py-0.5 text-xs font-semibold text-amarillo">
+              {a.nombre.split(' ')[0]} · {rango(a)}
+            </span>
+          ))}
+        </p>
+      )}
+    </section>
+  );
+}
+
+// ---------- tarjeta de una persona ----------
+function Persona({
+  c,
+  propia,
+  hoy,
+  ausencias,
+  horario,
+  onDialogo,
+  onAcceso,
+}: {
+  c: Cuenta;
+  propia: boolean;
+  hoy: string;
+  ausencias: Ausencia[];
+  horario?: Franja[];
+  onDialogo: (t: 'editar' | 'vacaciones' | 'horario') => void;
+  onAcceso: () => void;
+}) {
+  const color = esRol(c.role) ? ROLES[c.role].color : 'var(--color-line)';
+  const ahora = ausencias.find((a) => cubre(a, hoy));
+  const siguiente = ausencias.find((a) => a.desde > hoy);
+  return (
+    <article className={`card flex flex-col p-5 transition-shadow hover:shadow-md ${c.banned ? 'opacity-60' : ''}`}>
+      <div className="flex items-start gap-3">
+        <span className="shrink-0 rounded-full p-[3px]" style={{ background: color }}>
+          <span className="block rounded-full bg-white p-[2px]">
+            <Iniciales nombre={c.name || c.email} />
+          </span>
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-semibold">
+            {c.name} {propia && <span className="text-xs font-normal text-muted">(tú)</span>}
+          </p>
+          <p className="truncate text-sm text-muted">{c.email}</p>
+        </div>
+        <span
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${c.banned ? 'bg-soft text-muted' : ahora ? 'bg-amarillo/15 text-amarillo' : 'bg-verde/12 text-verde'}`}
+        >
+          {c.banned ? <Lock className="size-3" aria-hidden /> : ahora ? <Palmtree className="size-3" aria-hidden /> : <span className="size-1.5 rounded-full bg-verde" aria-hidden />}
+          {c.banned ? 'Sin acceso' : ahora ? `${ahora.motivo} hasta el ${fechaCorta(ahora.hasta)}` : 'Activa'}
+        </span>
+      </div>
+
+      <ul className="mt-3 flex flex-wrap gap-1.5 text-[11px] font-medium">
+        {c.role === 'especialista' && (
+          <li className={`rounded-full px-2 py-0.5 ${c.profesional ? 'bg-soft text-ink/75' : 'bg-amarillo/15 text-amarillo'}`}>{c.profesional ? `Agenda: ${c.profesional}` : 'Sin agenda asignada'}</li>
+        )}
+        {horario && (
+          <li className={`rounded-full px-2 py-0.5 ${horario.length ? 'bg-soft text-ink/75' : 'bg-amarillo/15 text-amarillo'}`}>{horario.length ? resumenHorario(horario) : 'Sin horario'}</li>
+        )}
+        {siguiente && (
+          <li className="inline-flex items-center gap-1 rounded-full bg-soft px-2 py-0.5 text-ink/75">
+            <Palmtree className="size-3" aria-hidden /> {siguiente.motivo}: {rango(siguiente)}
+          </li>
+        )}
+      </ul>
+
+      <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-line pt-3 [&]:mt-4">
+        <Boton icono={Pencil} onClick={() => onDialogo('editar')} etiqueta={`Editar ${c.name}`}>
+          Editar
+        </Boton>
+        <Boton icono={Palmtree} onClick={() => onDialogo('vacaciones')} etiqueta={`Vacaciones de ${c.name}`}>
+          Vacaciones
+        </Boton>
+        {c.role === 'especialista' && c.profesional && (
+          <Boton icono={CalendarClock} onClick={() => onDialogo('horario')} etiqueta={`Horario de ${c.name}`}>
+            Horario
+          </Boton>
+        )}
+        {!propia && (
+          <button
+            onClick={onAcceso}
+            title={c.banned ? 'Devolverle el acceso al panel' : 'Quitar el acceso al panel (se cierran sus sesiones)'}
+            aria-label={c.banned ? `Reactivar a ${c.name}` : `Quitar acceso a ${c.name}`}
+            className={`ml-auto ${c.banned ? `${btnChico} bg-ink text-white` : 'grid size-8 place-items-center rounded-full text-muted hover:bg-rojo/10 hover:text-rojo'}`}
+          >
+            {c.banned ? 'Reactivar' : <UserX className="size-4" aria-hidden />}
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
 function Boton({ icono: Icono, onClick, etiqueta, children }: { icono: typeof Pencil; onClick: () => void; etiqueta: string; children: ReactNode }) {
   return (
     <button onClick={onClick} aria-label={etiqueta} className={`${btnChico} bg-soft text-ink/75 hover:text-ink`}>
@@ -298,8 +513,8 @@ function Formulario({ titulo, sub, onSubmit, children }: { titulo: string; sub?:
 const MensajeError = ({ texto }: { texto: string }) => (texto ? <p className="rounded-2xl bg-rojo/10 px-3 py-2 text-sm text-rojo">{texto}</p> : null);
 
 // ---------- editar nombre, correo y contraseña ----------
-function EditarCuenta({ c, onGuardada }: { c: Cuenta; onGuardada: (t: string) => void }) {
-  const [f, setF] = useState({ name: c.name, email: c.email, password: '' });
+function EditarCuenta({ c, propia, onGuardada }: { c: Cuenta; propia: boolean; onGuardada: (t: string) => void }) {
+  const [f, setF] = useState({ name: c.name, email: c.email, password: '', role: (esRol(c.role) ? c.role : 'auxiliar') as Rol, profesional: c.profesional ?? '' });
   const [error, setError] = useState('');
   const [enviando, setEnviando] = useState(false);
 
@@ -308,7 +523,23 @@ function EditarCuenta({ c, onGuardada }: { c: Cuenta; onGuardada: (t: string) =>
     setError('');
     setEnviando(true);
     const email = f.email.trim().toLowerCase();
-    const cambios = { ...(f.name.trim() !== c.name && { name: f.name.trim() }), ...(email !== c.email && { email }) };
+    if (f.role === 'especialista' && !f.profesional) {
+      setEnviando(false);
+      return setError('Elige la agenda del especialista.');
+    }
+    if (!propia && f.role !== c.role) {
+      const { error } = await authClient.admin.setRole({ userId: c.id, role: f.role });
+      if (error) {
+        setEnviando(false);
+        return setError(error.message || 'No se pudo cambiar el rol.');
+      }
+    }
+    const profesional = f.role === 'especialista' ? f.profesional : '';
+    const cambios = {
+      ...(f.name.trim() !== c.name && { name: f.name.trim() }),
+      ...(email !== c.email && { email }),
+      ...(profesional !== (c.profesional ?? '') && { profesional: profesional || null }),
+    };
     if (Object.keys(cambios).length) {
       const { error } = await authClient.admin.updateUser({ userId: c.id, data: cambios });
       if (error) {
@@ -324,7 +555,7 @@ function EditarCuenta({ c, onGuardada }: { c: Cuenta; onGuardada: (t: string) =>
       }
     }
     setEnviando(false);
-    onGuardada(f.password ? `Datos y contraseña de ${f.name.trim()} actualizados` : `Datos de ${f.name.trim()} actualizados`);
+    onGuardada(`${f.name.trim()}: cambios guardados`);
   };
 
   return (
@@ -338,6 +569,25 @@ function EditarCuenta({ c, onGuardada }: { c: Cuenta; onGuardada: (t: string) =>
         <input type="email" required value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} className="field mt-1" />
         <span className="mt-1 block text-xs font-normal text-muted">Si entra con Google, debe ser el mismo correo de su cuenta de Google.</span>
       </label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm font-medium">
+          Rol
+          <select value={f.role} disabled={propia} onChange={(e) => setF({ ...f, role: e.target.value as Rol })} className="field mt-1 disabled:opacity-60">
+            {OPCIONES.map(([r, x]) => (
+              <option key={r} value={r}>
+                {x.nombre}
+              </option>
+            ))}
+          </select>
+          {propia && <span className="mt-1 block text-xs font-normal text-muted">No puedes cambiar tu propio rol.</span>}
+        </label>
+        {f.role === 'especialista' && (
+          <label className="block text-sm font-medium">
+            Agenda
+            <SelectAgenda etiqueta="Agenda del especialista" valor={f.profesional} onCambio={(p) => setF({ ...f, profesional: p })} className="mt-1" />
+          </label>
+        )}
+      </div>
       <label className="block text-sm font-medium">
         Nueva contraseña <span className="font-normal text-muted">(opcional)</span>
         <input type="password" minLength={8} autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} className="field mt-1" />

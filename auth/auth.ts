@@ -14,11 +14,15 @@ import { admin } from 'better-auth/plugins';
 import { ac, permisos } from '../src/lib/roles';
 
 const google = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET;
+// Direcciones extra desde las que se puede entrar (p. ej. un túnel privado de Tailscale o Cloudflare),
+// separadas por comas; admite comodines: https://*.trycloudflare.com. Vacío = solo BETTER_AUTH_URL.
+export const origenesConfiables = (process.env.ORIGENES_CONFIABLES ?? '').split(',').map((o) => o.trim()).filter(Boolean);
 
 export const auth = betterAuth({
   // la base la comparte con FastAPI: espera hasta 5 s si el otro proceso está escribiendo (la base está en modo WAL)
   database: new DatabaseSync('backend/blissens.db', { timeout: 5000 }),
   emailAndPassword: { enabled: true, disableSignUp: true },
+  trustedOrigins: origenesConfiables,
   // especialistas: qué agenda es la suya ('Dra. Sara López' | 'Dr. Juan Manuel Olarte'); solo gerencia lo asigna
   user: { additionalFields: { profesional: { type: 'string', required: false, input: false } } },
   socialProviders: google

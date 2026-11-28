@@ -60,6 +60,11 @@ export default defineConfig(({mode}) => {
       proxy: {
         '/api': `http://localhost:${process.env.API_PORT ?? 8000}`,
       },
+      // túnel privado (ORIGENES_CONFIABLES en .env): Vite solo atiende esos dominios además de localhost
+      allowedHosts: (loadEnv(mode, __dirname, '').ORIGENES_CONFIABLES ?? '')
+        .split(',')
+        .map((o) => o.trim().replace(/^https?:\/\//, '').replace(/^\*\./, '.').replace(/[:/].*$/, ''))
+        .filter(Boolean),
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
