@@ -57,7 +57,7 @@ export function InsigniaRiesgo({ p, oscuro = false, detalle = false }: { p: Paci
     <span className={`inline-flex cursor-help items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${cls}`} title={textoRiesgo(p)}>
       <span className={`size-1.5 rounded-full ${alto ? 'bg-rojo' : 'bg-amarillo'}`} />
       {alto ? 'Riesgo alto' : 'Riesgo medio'}
-      {detalle && <span className="font-normal opacity-80">· {p.fallosSeguidos} seguidas</span>}
+      {detalle && <span className="font-normal opacity-80">· {p.fallosSeguidos} {p.fallosSeguidos === 1 ? 'sin asistir' : 'seguidas'}</span>}
     </span>
   );
 }

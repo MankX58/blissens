@@ -68,7 +68,7 @@ export function Cargar({ onSubir, gerencia = false, onFuente }: { onSubir: (a: A
     <div>
       <Encabezado
         titulo="Carga la agenda del software"
-        descripcion="Sube los Excel tal como salen del software (puedes soltar los 4 a la vez). El panel cruza las dos agendas por # Cita y # Paciente, agrupa las citas de cada paciente, lo clasifica en los 4 segmentos del SRS y estima su valor con el arancel."
+        descripcion="Sube los Excel tal como salen del software (puedes soltar los 4 a la vez). El panel cruza las dos agendas por # Cita y # Paciente, agrupa las citas de cada paciente, lo clasifica según en qué punto se quedó y estima el valor de su tratamiento."
       />
       <EnLinea gerencia={gerencia} onCambio={onFuente} />
 
@@ -182,7 +182,7 @@ export function Cargar({ onSubir, gerencia = false, onFuente }: { onSubir: (a: A
           </dl>
 
           <div className="card mt-4 p-6">
-            <h3 className="kicker">Segmentos del SRS</h3>
+            <h3 className="kicker">En qué punto está cada paciente</h3>
             <ul className="mt-4 space-y-3">
               {grupos.map(({ g, n }) => (
                 <li key={g}>

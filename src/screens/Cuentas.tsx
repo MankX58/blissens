@@ -463,7 +463,8 @@ function Persona({
         )}
       </ul>
 
-      <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
+      <div className="mt-4 flex items-start gap-1.5 border-t border-line pt-3">
+        <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
         <Boton icono={Pencil} onClick={() => onDialogo('editar')} etiqueta={`Editar ${c.name}`}>
           Editar
         </Boton>
@@ -475,12 +476,13 @@ function Persona({
             Horario
           </Boton>
         )}
+        </div>
         {!propia && (
           <button
             onClick={onAcceso}
             title={c.banned ? 'Devolverle el acceso al panel' : 'Quitar el acceso al panel (se cierran sus sesiones)'}
             aria-label={c.banned ? `Reactivar a ${c.name}` : `Quitar acceso a ${c.name}`}
-            className={`ml-auto ${c.banned ? `${btnChico} bg-ink text-white` : 'grid size-8 place-items-center rounded-full text-muted hover:bg-rojo/10 hover:text-rojo'}`}
+            className={`shrink-0 ${c.banned ? `${btnChico} bg-ink text-white` : 'grid size-8 place-items-center rounded-full text-muted hover:bg-rojo/10 hover:text-rojo'}`}
           >
             {c.banned ? 'Reactivar' : <UserX className="size-4" aria-hidden />}
           </button>
@@ -827,7 +829,12 @@ function Descansos({ pausas, onGuardado }: { pausas: Pausa[]; onGuardado: (t: st
           ))}
         </ul>
       ) : (
-        <p className="mt-4 rounded-2xl bg-soft px-4 py-3 text-sm text-muted">Sin descansos: todo el horario de cada especialista cuenta como tiempo de atención.</p>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-soft px-4 py-3 text-sm">
+          <span className="text-muted">Sin descansos: todo el horario de cada especialista cuenta como tiempo de atención.</span>
+          <button onClick={() => setLista([{ nombre: 'Almuerzo', inicio: '12:00', fin: '13:00' }])} className={`${btnChico} shrink-0 bg-ink text-white`}>
+            Usar almuerzo de la clínica (12:00–13:00)
+          </button>
+        </div>
       )}
       <MensajeError texto={error} />
       {cambiada && (

@@ -308,6 +308,7 @@ function Agenda({ r, oc }: { r: ReturnType<typeof radiografia>; oc: ReturnType<t
     { k: 'No se cumplieron', v: r.friccion, cls: 'bg-rojo' },
   ].filter((p) => p.v > 0);
   return (
+    <div className="space-y-4">
     <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
       <Tarjeta titulo={`${r.total.toLocaleString('es-CO')} citas de ${r.pacientes.toLocaleString('es-CO')} pacientes`}>
         <div className="flex h-3 overflow-hidden rounded-full bg-soft" role="img" aria-label={partes.map((p) => `${p.k}: ${p.v}`).join(', ')}>
@@ -330,10 +331,6 @@ function Agenda({ r, oc }: { r: ReturnType<typeof radiografia>; oc: ReturnType<t
             <b className="text-ink">{r.whatsappFallida}</b> recordatorios de WhatsApp fallaron (número malo o inactivo): esos pacientes salen marcados para revisar el número.
           </p>
         )}
-        <p className="mb-3 mt-6 text-xs font-medium text-muted">Citas que no se cumplieron, por día</p>
-        <Barras
-          filas={r.friccionPorDia.map((d) => ({ k: d.k, v: d.v, extra: pct(d.v, d.total), color: d.k === 'Lunes' || d.k === 'Miércoles' ? 'bg-rojo' : 'bg-ink/40' }))}
-        />
       </Tarjeta>
       <Tarjeta titulo="Citas por mes">
         <div className="flex h-32 items-end gap-3">
@@ -350,21 +347,30 @@ function Agenda({ r, oc }: { r: ReturnType<typeof radiografia>; oc: ReturnType<t
           <p className="pt-2 text-xs font-medium text-muted">Citas por especialista (usuario con que se agendó)</p>
           <Barras filas={r.porProfesional.map((x) => ({ k: x.k, v: x.v, extra: pct(x.v, r.total) }))} />
         </div>
-        {oc.hay && (
-          <div className="mt-5 border-t border-line pt-4">
-            <p className="text-xs font-medium text-muted">
-              Ocupación próximos 14 días: <b className="text-ink">{oc.pct} %</b> · meta {META_OCUPACION} %
-            </p>
-            <div className="mt-3">
+      </Tarjeta>
+    </div>
+    <Tarjeta titulo="¿Qué días cuesta más llenar?" sub="Lunes y miércoles son los más difíciles según la clínica">
+      <div className="grid gap-8 md:grid-cols-2">
+        <div>
+          <p className="mb-3 text-xs font-medium text-muted">Citas que no se cumplieron, por día</p>
+          <Barras filas={r.friccionPorDia.map((d) => ({ k: d.k, v: d.v, extra: pct(d.v, d.total), color: d.k === 'Lunes' || d.k === 'Miércoles' ? 'bg-rojo' : 'bg-ink/40' }))} />
+        </div>
+        <div>
+          <p className="mb-3 text-xs font-medium text-muted">
+            {oc.hay ? <>Ocupación próximos 14 días: <b className="text-ink">{oc.pct} %</b> · meta {META_OCUPACION} %</> : 'Ocupación: aún no hay agenda futura cargada'}
+          </p>
+          {oc.hay && (
+            <>
               <Barras
                 formato={(x) => `${x} %`}
-                filas={oc.porDia.filter((d) => d.hay).map((d) => ({ k: d.k, v: d.v, color: d.v >= META_OCUPACION ? 'bg-verde' : d.k === 'Lunes' || d.k === 'Miércoles' ? 'bg-rojo' : 'bg-amarillo' }))}
+                filas={oc.porDia.filter((d) => d.hay).map((d) => ({ k: d.k, v: d.v, color: d.v >= META_OCUPACION ? 'bg-verde' : 'bg-amarillo' }))}
               />
-            </div>
-            <p className="mt-2 text-[11px] text-muted">Estimada: 8 h por día con agenda, menos los cupos libres.</p>
-          </div>
-        )}
-      </Tarjeta>
+              <p className="mt-2 text-[11px] text-muted">Estimada: 8 h por día con agenda, menos los cupos libres. Verde = en la meta.</p>
+            </>
+          )}
+        </div>
+      </div>
+    </Tarjeta>
     </div>
   );
 }

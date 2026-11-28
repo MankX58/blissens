@@ -118,7 +118,10 @@ export function Inicio({ datos, hoy, usuario, onIr, onAbrir }: Props) {
       </header>
 
       {r.kpis && (
-        <section aria-label="Indicadores clave" className="entrar card grid grid-cols-2 gap-px overflow-hidden bg-line p-0 lg:grid-cols-4">
+        <section
+          aria-label="Indicadores clave"
+          className={`entrar card grid grid-cols-2 gap-px overflow-hidden bg-line p-0 ${r.kpis.length === 5 ? 'sm:grid-cols-3 lg:grid-cols-5' : 'lg:grid-cols-4'} [&>*:last-child:nth-child(odd)]:col-span-2 sm:[&>*:last-child:nth-child(odd)]:col-span-1`}
+        >
           {r.kpis.map((k) => (
             <div key={k.k} className="bg-white p-4 sm:p-5">
               <p className="text-xs font-medium text-muted">{k.k}</p>
@@ -136,8 +139,8 @@ export function Inicio({ datos, hoy, usuario, onIr, onAbrir }: Props) {
           {usuario.rol === 'direccion' ? 'Cómo va cada área' : 'Tus responsabilidades'}
         </h2>
         {destacada ? (
-          <div className="escalonado grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <Tarjeta r={destacada} oscura sola={!resto.length} onIr={onIr} />
+          <div className={`escalonado grid gap-3 sm:grid-cols-2 ${resto.length >= 2 ? 'xl:grid-cols-3' : ''}`}>
+            <Tarjeta r={destacada} oscura sola={!resto.length} par={resto.length === 1} onIr={onIr} />
             {resto.map((x) => (
               <Tarjeta key={x.titulo} r={x} onIr={onIr} />
             ))}
@@ -235,14 +238,15 @@ const TONO: Record<Tono, { t: string; cls: string; oscuro: string }> = {
 };
 
 // sola = la única pendiente: ocupa todo el ancho, con el desglose a la derecha
-function Tarjeta({ r, oscura = false, sola = false, onIr }: { r: Resp; oscura?: boolean; sola?: boolean; onIr: (p: Pantalla) => void }) {
+// par = solo hay dos tarjetas: van lado a lado, mitad y mitad
+function Tarjeta({ r, oscura = false, sola = false, par = false, onIr }: { r: Resp; oscura?: boolean; sola?: boolean; par?: boolean; onIr: (p: Pantalla) => void }) {
   const t = TONO[r.tono];
   const pct = r.avance && r.avance[1] ? Math.round((r.avance[0] / r.avance[1]) * 100) : null;
   return (
     <button
       onClick={() => onIr(r.ir)}
       className={`group relative flex min-h-[190px] flex-col overflow-hidden rounded-[24px] p-5 text-left sm:p-6 ${
-        oscura ? `bg-ink text-white sm:col-span-2 ${sola ? 'xl:col-span-3' : `xl:col-span-1 ${r.desglose ? 'xl:row-span-2' : ''}`}` : 'card lift'
+        oscura ? `bg-ink text-white ${par ? '' : `sm:col-span-2 ${sola ? 'xl:col-span-3' : `xl:col-span-1 ${r.desglose ? 'xl:row-span-2' : ''}`}`}` : 'card lift'
       } ${sola && r.desglose ? 'lg:grid lg:grid-cols-[1fr_320px] lg:content-start lg:gap-x-12' : ''}`}
     >
       {oscura && <span className="aura iris pointer-events-none absolute -right-20 -top-24 size-64 rounded-full opacity-30 blur-3xl" aria-hidden />}
@@ -506,7 +510,7 @@ const RESUMEN: Record<Rol, (d: Datos, hoy: string) => Resumen> = {
     const resp = enviados.filter((e) => e.estado === 'respondio').length;
     const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
     const oc = ocupacion(citas, huecos, hoy);
-    const flojos = oc.porDia.filter((x) => x.hay && x.v < META_OCUPACION && (x.k === 'Lunes' || x.k === 'Miércoles'));
+    const flojos = oc.porDia.filter((x) => x.hay && x.v < META_OCUPACION);
     const porDoctor = ESPECIALISTAS.map((e) => ({ k: e, v: suma(porRecuperar.filter((p) => p.especialista === e)) })).sort((a, b) => b.v - a.v);
     return {
       foco: {
@@ -538,10 +542,10 @@ const RESUMEN: Record<Rol, (d: Datos, hoy: string) => Resumen> = {
           vacia: !oc.hay,
           texto: flojos.length ? (
             <>
-              <b>{flojos.map((x) => x.k).join(' y ')}</b> {flojos.length > 1 ? 'están' : 'está'} por debajo de la meta: ofrezca ahí los cupos a quien quiere adelantar su cita.
+              <b>{flojos.map((x) => x.k).join(', ').replace(/, ([^,]*)$/, ' y $1')}</b> {flojos.length > 1 ? 'están' : 'está'} por debajo de la meta: ofrezca ahí los cupos a quien quiere adelantar su cita.
             </>
           ) : (
-            <>Lunes y miércoles suelen ser los más difíciles de llenar; hoy van en la meta o por encima.</>
+            <>Todos los días van en la meta o por encima. Lunes y miércoles suelen ser los más difíciles: vigílelos.</>
           ),
           barras: oc.porDia.filter((x) => x.hay).map((x) => ({ k: x.k, v: x.v, txt: `${x.v} %` })),
         },
@@ -552,7 +556,7 @@ const RESUMEN: Record<Rol, (d: Datos, hoy: string) => Resumen> = {
               <b>{porDoctor[0].k}</b> concentra {pct(porDoctor[0].v, porDoctor.reduce((s, x) => s + x.v, 0))} % del valor por recuperar.
             </>
           ),
-          barras: porDoctor.map((x) => ({ ...x, txt: pesosCorto(x.v) })),
+          barras: porDoctor.map((x) => ({ ...x, txt: x.v ? pesosCorto(x.v) : 'Sin pacientes aún' })),
         },
         {
           titulo: 'Dónde se atasca el paciente',

@@ -42,7 +42,7 @@ const RESULTADOS: { id: Resultado; ayuda: string }[] = [
   { id: 'lo_pensara', ayuda: 'Sigue en la regla 3-7-15' },
   { id: 'sin_respuesta', ayuda: 'Sigue en la regla 3-7-15' },
   { id: 'no_interesa', ayuda: 'No contactar más' },
-  { id: 'sin_whatsapp', ayuda: 'Revisar el número' },
+  { id: 'sin_whatsapp', ayuda: 'Número inválido' },
 ];
 
 export function Contactar({
@@ -371,16 +371,16 @@ export function Contactar({
         </Paso>
 
         <Paso n={2} titulo="¿Qué respondió?" hecho={!!resultado}>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" role="radiogroup" aria-label="Respuesta del paciente">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5" role="radiogroup" aria-label="Respuesta del paciente">
             {RESULTADOS.map((r) => (
               <button
                 key={r.id}
                 role="radio"
                 aria-checked={resultado === r.id}
                 onClick={() => setResultado(r.id)}
-                className={`rounded-2xl border px-3 py-2.5 text-left ${resultado === r.id ? 'border-ink bg-ink text-white' : 'border-line bg-white hover:border-ink/40'}`}
+                className={`rounded-2xl border px-3 py-2.5 text-left last:col-span-2 sm:last:col-span-1 ${resultado === r.id ? 'border-ink bg-ink text-white' : 'border-line bg-white hover:border-ink/40'}`}
               >
-                <span className="block text-sm font-semibold">{RESULTADO_TXT[r.id]}</span>
+                <span className="block text-sm font-semibold leading-tight">{RESULTADO_TXT[r.id]}</span>
                 <span className={`text-[11px] ${resultado === r.id ? 'text-white/70' : 'text-muted'}`}>{r.ayuda}</span>
               </button>
             ))}
@@ -398,37 +398,28 @@ export function Contactar({
               {resultado === 'no_interesa' && (
                 <Chips titulo="No volver a contactar porque…" opciones={NO_CONTACTAR.map((m) => [m, NO_CONTACTAR_TXT[m]])} valor={noContactar} onCambio={(v) => setNoContactar(v as MotivoNoContactar)} />
               )}
-              {resultado !== 'no_interesa' && resultado !== 'sin_whatsapp' && (
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input type="checkbox" checked={adelantar} onChange={(e) => setAdelantar(e.target.checked)} className="size-4 accent-ink" />
-                  Quiere adelantar su cita si se libera un cupo
-                </label>
-              )}
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-                <label className="flex cursor-pointer items-center gap-2">
-                  <input type="checkbox" checked={chat} onChange={(e) => setChat(e.target.checked)} className="size-4 accent-ink" />
+              {/* datos que sirven para la próxima vez: agrupados para no mezclarlos con la respuesta */}
+              <div className="divide-y divide-line rounded-2xl border border-line bg-white text-sm">
+                <p className="px-4 pb-1 pt-3 text-xs font-medium text-muted">Para la próxima vez</p>
+                {resultado !== 'no_interesa' && resultado !== 'sin_whatsapp' && (
+                  <label className="flex cursor-pointer items-center justify-between gap-3 px-4 py-2.5">
+                    Quiere adelantar su cita si se libera un cupo
+                    <input type="checkbox" checked={adelantar} onChange={(e) => setAdelantar(e.target.checked)} className="size-4 shrink-0 accent-ink" />
+                  </label>
+                )}
+                <label className="flex cursor-pointer items-center justify-between gap-3 px-4 py-2.5">
                   Ya tiene chat de WhatsApp con la clínica
+                  <input type="checkbox" checked={chat} onChange={(e) => setChat(e.target.checked)} className="size-4 shrink-0 accent-ink" />
                 </label>
-                <span className="flex items-center gap-2">
-                  <span className="text-muted">¿Autoriza WhatsApp?</span>
-                  {([
-                    [true, 'Sí'],
-                    [false, 'No'],
-                    [null, 'Sin preguntar'],
-                  ] as const).map(([v, t]) => (
-                    <button
-                      key={t}
-                      onClick={() => setAutoriza(v)}
-                      aria-pressed={autoriza === v}
-                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${autoriza === v ? 'bg-ink text-white' : 'bg-soft text-ink/70'}`}
-                    >
-                      {t}
+                <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+                  <span>
+                    ¿Autoriza escribirle por WhatsApp?{' '}
+                    <button onClick={copiarAutorizacion} className="text-xs font-semibold text-ink/60 underline hover:text-ink" title="Mensaje de autorización (Ley 1581 de 2012)">
+                      Copiar formato
                     </button>
-                  ))}
-                  <button onClick={copiarAutorizacion} className="text-xs font-semibold text-ink/70 underline hover:text-ink" title="Mensaje de autorización (Ley 1581 de 2012)">
-                    Copiar formato
-                  </button>
-                </span>
+                  </span>
+                  <Segmentado valor={autoriza} onCambio={setAutoriza} />
+                </div>
               </div>
               <label className="block text-xs font-medium text-muted">
                 Nota (opcional)
@@ -474,6 +465,23 @@ function Pasos({ p, paso }: { p: Paciente; paso: number | null }) {
         );
       })}
     </ol>
+  );
+}
+
+// Sí / No / Sin preguntar en una sola pieza: se ve de un vistazo cuál está marcado
+export function Segmentado({ valor, onCambio }: { valor: boolean | null; onCambio: (v: boolean | null) => void }) {
+  return (
+    <span className="inline-flex shrink-0 rounded-full bg-soft p-0.5 text-xs font-semibold" role="radiogroup" aria-label="Autorización de WhatsApp">
+      {([
+        [true, 'Sí'],
+        [false, 'No'],
+        [null, 'Sin preguntar'],
+      ] as const).map(([v, t]) => (
+        <button key={t} role="radio" aria-checked={valor === v} onClick={() => onCambio(v)} className={`rounded-full px-3 py-1 ${valor === v ? 'bg-white text-ink shadow-sm' : 'text-ink/60 hover:text-ink'}`}>
+          {t}
+        </button>
+      ))}
+    </span>
   );
 }
 

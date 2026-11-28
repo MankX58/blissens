@@ -179,7 +179,7 @@ export const RESULTADO_TXT: Record<Resultado, string> = {
   sin_respuesta: 'No respondió',
   lo_pensara: 'Lo va a pensar',
   no_interesa: 'No le interesa',
-  sin_whatsapp: 'Número inválido / sin WhatsApp',
+  sin_whatsapp: 'Sin WhatsApp',
 };
 
 export const pesos = (n: number) =>

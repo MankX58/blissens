@@ -322,7 +322,7 @@ function Fila({ p, hoy, primero, onContactar, onAbrir }: { p: Paciente; hoy: str
           {p.tratamiento && <span className="text-ink/60"> · {p.tratamiento}</span>}
         </p>
         {/* solo cuando el color no se explica por la fecha: urgente por ser VIP o por faltar seguido */}
-        {color === 'rojo' && paso !== 3 && (
+        {color === 'rojo' && paso !== 3 && p.caso !== 'cancelo' && p.caso !== 'no_asistio' && (
           <p className="mt-1 flex items-start gap-1.5 text-[13px]">
             <Punto color={color} className="mt-[5px]" />
             <span>

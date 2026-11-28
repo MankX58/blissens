@@ -3,6 +3,7 @@ import { ArrowLeft, CalendarCheck, ChevronDown, ChevronRight, Flag, Megaphone, M
 import type { Antiguedad, Caso, Datos, Estado, Grupo, MotivoNoContactar, Paciente, Profesional, Segmento } from '../types';
 import { TEXTO_AUTORIZACION, rellenar } from '../lib/guiones';
 import { lineaDeTiempo, type TipoEvento } from '../lib/expediente';
+import { Segmentado } from '../components/Contactar';
 import {
   CASO_TXT,
   ESPECIALISTAS,
@@ -596,20 +597,16 @@ function Expediente({
           {!soloLectura && (
             <Grupo titulo="WhatsApp y agenda">
               <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <input type="checkbox" checked={quiereAdelantar(p)} onChange={(e) => marcar(e.target.checked ? `${ADELANTAR}.` : `${NO_ADELANTAR}.`)} className="size-4 accent-ink" />
                 Quiere adelantar su cita
+                <input type="checkbox" checked={quiereAdelantar(p)} onChange={(e) => marcar(e.target.checked ? `${ADELANTAR}.` : `${NO_ADELANTAR}.`)} className="ml-auto size-4 accent-ink" />
               </label>
-              <p className="mt-2 text-sm">
-                Autorización WhatsApp:{' '}
-                <b className="font-semibold">{autoriza === null ? 'sin preguntar' : autoriza ? 'sí' : 'no'}</b>
-              </p>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                <button onClick={() => marcar(`${AUTORIZA} (Ley 1581 de 2012).`)} className={`${btnChico} bg-soft`}>Autorizó</button>
-                <button onClick={() => marcar(`${NO_AUTORIZA}.`)} className={`${btnChico} bg-soft`}>No autorizó</button>
-                <button onClick={() => navigator.clipboard?.writeText(rellenar(TEXTO_AUTORIZACION, p, { asesora: '' })).catch(() => undefined)} className={`${btnChico} text-ink/70 underline`}>
-                  Copiar formato
-                </button>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span>Autoriza WhatsApp</span>
+                <Segmentado valor={autoriza} onCambio={(v) => v !== null && v !== autoriza && marcar(v ? `${AUTORIZA} (Ley 1581 de 2012).` : `${NO_AUTORIZA}.`)} />
               </div>
+              <button onClick={() => navigator.clipboard?.writeText(rellenar(TEXTO_AUTORIZACION, p, { asesora: '' })).catch(() => undefined)} className="mt-1.5 text-xs font-semibold text-ink/60 underline hover:text-ink">
+                Copiar formato de autorización
+              </button>
             </Grupo>
           )}
           {p.estado === 'pendiente' && !soloLectura && (
