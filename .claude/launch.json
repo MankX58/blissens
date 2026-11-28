@@ -18,6 +18,18 @@
         "api"
       ],
       "port": 8000
+    },
+    {
+      "name": "pitch-tmp",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "3020",
+        "--directory",
+        "C:/Users/manel/Descargas/Presentaci\u00f3n"
+      ],
+      "port": 3020
     }
   ]
 }
