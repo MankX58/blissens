@@ -155,7 +155,7 @@ export function Cuentas({ yo, hoy, onAviso, onEquipo }: { yo: string; hoy: strin
                     <b className="font-semibold">{d?.nombre ?? 'Sin rol'}</b>
                     <span className="num rounded-full bg-soft px-1.5 text-xs text-muted">{grupo.length}</span>
                   </h3>
-                  {d && <p className="mb-3 mt-0.5 pl-[18px] text-xs text-muted">{d.proposito}</p>}
+                  {d && <p className="mb-3 mt-0.5 pl-4.5 text-xs text-muted">{d.proposito}</p>}
                   <div className="escalonado grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     {grupo.map((c) => (
                       <Persona
@@ -304,7 +304,7 @@ function Semana({ hoy, equipo, cuentas, onHorario }: { hoy: string; equipo: Equi
   });
   return (
     <section aria-labelledby="t-semana" className="entrar card overflow-hidden">
-      <div className="flex flex-wrap items-end justify-between gap-2 p-5 pb-3 sm:p-6 sm:pb-3">
+      <div className="flex flex-wrap items-end justify-between gap-2 px-5 pt-5 pb-3 sm:px-6 sm:pt-6 sm:pb-3">
         <div>
           <h2 id="t-semana" className="text-xl font-bold tracking-tight">
             Esta semana en la clínica
@@ -321,7 +321,7 @@ function Semana({ hoy, equipo, cuentas, onHorario }: { hoy: string; equipo: Equi
         </p>
       </div>
       <div className="overflow-x-auto px-3 pb-4 sm:px-4">
-        <table className="w-full min-w-[600px] table-fixed border-separate border-spacing-1 text-sm">
+        <table className="w-[max(100%,600px)] table-fixed border-separate border-spacing-1 text-sm">
           <thead>
             <tr>
               <th className="w-36" />
@@ -373,11 +373,11 @@ function Semana({ hoy, equipo, cuentas, onHorario }: { hoy: string; equipo: Equi
                     const b = minutos(f.fin);
                     const huecos = pausas.filter(([x, y]) => x < b && y > a);
                     return (
-                      <td key={d} className={`rounded-xl px-2 py-2.5 ${d === hoy ? 'bg-ink/[.05]' : 'bg-soft/60'}`} title={`${f.inicio}–${f.fin}`}>
+                      <td key={d} className={`rounded-xl px-2 py-2.5 ${d === hoy ? 'bg-ink/5' : 'bg-soft/60'}`} title={`${f.inicio}–${f.fin}`}>
                         <span className="relative block h-2 rounded-full bg-line/70" aria-hidden>
                           <span className="crecer-x absolute inset-y-0 rounded-full bg-ink" style={{ left: pos(a), right: `calc(100% - ${pos(b)})` }} />
                           {huecos.map(([x, y]) => (
-                            <span key={x} className="absolute inset-y-[-2px] w-[3px] rounded-full bg-paper" style={{ left: pos(x), width: `calc(${pos(y)} - ${pos(x)})` }} />
+                            <span key={x} className="absolute -inset-y-0.5 w-0.75 rounded-full bg-paper" style={{ left: pos(x), width: `calc(${pos(y)} - ${pos(x)})` }} />
                           ))}
                         </span>
                         <span className="num mt-1.5 block text-center text-xs font-medium">
@@ -430,8 +430,8 @@ function Persona({
   return (
     <article className={`card flex flex-col p-5 transition-shadow hover:shadow-md ${c.banned ? 'opacity-60' : ''}`}>
       <div className="flex items-start gap-3">
-        <span className="shrink-0 rounded-full p-[3px]" style={{ background: color }}>
-          <span className="block rounded-full bg-white p-[2px]">
+        <span className="shrink-0 rounded-full p-0.75" style={{ background: color }}>
+          <span className="block rounded-full bg-white p-0.5">
             <Iniciales nombre={c.name || c.email} />
           </span>
         </span>
@@ -463,7 +463,7 @@ function Persona({
         )}
       </ul>
 
-      <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-line pt-3 [&]:mt-4">
+      <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
         <Boton icono={Pencil} onClick={() => onDialogo('editar')} etiqueta={`Editar ${c.name}`}>
           Editar
         </Boton>
